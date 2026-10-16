@@ -90,6 +90,9 @@ export const SessionEventType = {
   SessionModeChanged: "session_mode_changed",
   SessionEnded: "session_ended",
   TurnStarted: "turn_started",
+  // 附件页数徽标（additive，2026-10-16）：resolve 后才知的展示元信息增量（见
+  // message-attachments.md「PDF 密码统一通道与阅读进度」节）。
+  TurnAttachmentMetaUpdated: "turn_attachment_meta_updated",
   TurnInputReceived: "turn_input_received",
   TurnSteerQueued: "turn_steer_queued",
   // guide 未遇到可用 tool batch 即收口时，原 intent 原地改投普通 queue。
@@ -240,6 +243,21 @@ export interface TurnAttachmentMeta {
   bytes: number;
   /** 内容引用（本地路径 / artifact URI）；data URL 等无稳定引用时缺省。 */
   ref?: string;
+  /** PDF 等分页文档的页数（仅展示徽标；resolve 时已知才补发，见 TurnAttachmentMetaUpdated）。 */
+  pageCount?: number;
+}
+
+/**
+ * TurnStarted 之后补发的附件展示元信息增量（仅当 ≥1 个附件有 pageCount）；
+ * updates.index 对齐 TurnStarted.attachments 顺序。仅展示元信息，非敏感。
+ */
+export interface TurnAttachmentMetaUpdatedPayload {
+  turnId: TurnId;
+  messageId: MessageId;
+  updates: Array<{
+    index: number;
+    pageCount: number;
+  }>;
 }
 
 /**
@@ -1302,6 +1320,7 @@ export type SessionEventPayload =
   | ToolCallScheduledPayload
   | ToolCallStartedPayload
   | ToolCallProgressPayload
+  | TurnAttachmentMetaUpdatedPayload
   | ToolCallResultPayload
   | ToolCallErrorPayload
   | ToolBatchCompletePayload

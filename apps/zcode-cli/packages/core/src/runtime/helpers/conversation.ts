@@ -87,11 +87,12 @@ export function buildUserContentFromTurn(
     if (isFailedTextAttachmentPlaceholder(attachment)) {
       continue;
     }
-    if (attachment.contentBlock.type === "video") {
+    if (attachment.contentBlock.type === "video" && !attachment.contentBlocks) {
       videoBlocks.push(attachment.contentBlock);
       continue;
     }
-    blocks.push(attachment.contentBlock);
+    // PDF 页图等多块形态在这里展开；单块附件行为不变。
+    blocks.push(...(attachment.contentBlocks ?? [attachment.contentBlock]));
   }
 
   if (blocks.length === 0 && pastedImageBlocks.length === 0 && videoBlocks.length === 0) {
@@ -136,7 +137,8 @@ export function buildRuntimeUserEntriesFromTurn(
       continue;
     }
 
-    realUserBlocks.push(attachment.contentBlock);
+    // PDF 页图等多块形态在这里展开；单块附件行为不变。
+    realUserBlocks.push(...(attachment.contentBlocks ?? [attachment.contentBlock]));
   }
 
   const blocks: ModelMessageContentBlock[] = [];

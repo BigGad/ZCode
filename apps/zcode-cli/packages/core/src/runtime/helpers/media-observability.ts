@@ -95,17 +95,19 @@ function summarizeResolvedTurnAttachment(attachment: ResolvedTurnAttachment, ind
   const block = attachment.contentBlock;
   const blockSource = "source" in block ? block.source : undefined;
   const metadata = attachment.metadata;
+  const blocks = attachment.contentBlocks ?? [block];
 
   return {
+    contentBlockCount: blocks.length,
     contentBlockType: block.type,
-    dataUrlBytes: contentBlockDataUrlBytes(block),
+    dataUrlBytes: blocks.reduce((sum, item) => sum + contentBlockDataUrlBytes(item), 0),
     errorCode: metadata.errorCode,
     filename: attachment.filename,
     hasArtifact: typeof metadata.artifactUri === "string",
     index,
     mediaType: contentBlockMediaType(block),
     mime: attachment.mime,
-    payloadBytes: contentBlockPayloadBytes(block),
+    payloadBytes: blocks.reduce((sum, item) => sum + contentBlockPayloadBytes(item), 0),
     placeholder: blockSource?.placeholder ?? attachment.source?.text.value,
     recoverability: metadata.recoverability,
     sizeBytes: metadata.sizeBytes,

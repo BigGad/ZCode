@@ -396,6 +396,167 @@ describe("Poppler PDF adapter", () => {
   });
 });
 
+describe("Poppler PDF adapter password handling", () => {
+  const PASSWORD = "s3cret-password";
+
+  it("passes the password as -upw to both pdfinfo and pdftoppm", async () => {
+    const tempRoot = await temporaryRoot();
+    const requests: ExecutionRequest[] = [];
+    const executionPort = executionPortWith(async (request) => {
+      requests.push(request);
+      const args = request.command.mode === "argv" ? (request.command.args ?? []) : [];
+      if (args.includes("-v")) return completedResult();
+      const outputPrefix = args.at(-1)!;
+      await writeFile(`${outputPrefix}-1.jpg`, "page-one");
+      return completedResult();
+    });
+    const adapter = createPopplerPdfDocumentAdapter({ executionPort, tempRoot });
+
+    await adapter.getPageCount({ filePath: "/tmp/locked.pdf", password: PASSWORD, trace: trace() });
+    await adapter.renderPages(
+      { filePath: "/tmp/locked.pdf", firstPage: 1, lastPage: 1, password: PASSWORD, trace: trace() },
+      { signal: new AbortController().signal },
+    );
+
+    const pdfinfo = requests.find((request) =>
+      (request.command as { file?: string }).file === "pdfinfo");
+    expect((pdfinfo!.command as { args: string[] }).args).toEqual([
+      "-upw",
+      PASSWORD,
+      "/tmp/locked.pdf",
+    ]);
+    const render = requests.filter((request) => {
+      const command = request.command as { file?: string; args?: string[] };
+      return command.file === "pdftoppm" && !command.args?.includes("-v");
+    });
+    expect(render).toHaveLength(1);
+    expect((render[0]!.command as { args: string[] }).args).toEqual([
+      "-jpeg",
+      "-r",
+      "100",
+      "-f",
+      "1",
+      "-l",
+      "1",
+      "-upw",
+      PASSWORD,
+      "/tmp/locked.pdf",
+      expect.any(String),
+    ]);
+  });
+
+  it("retries once with -opw when the user-password attempt is rejected", async () => {
+    const tempRoot = await temporaryRoot();
+    const attempts: string[][] = [];
+    const executionPort = executionPortWith(async (request) => {
+      const args = request.command.mode === "argv" ? (request.command.args ?? []) : [];
+      if (args.includes("-v")) return completedResult();
+      attempts.push(args);
+      if (args.includes("-upw")) {
+        return failedResult("Command Line Error: Incorrect password");
+      }
+      const outputPrefix = args.at(-1)!;
+      await writeFile(`${outputPrefix}-1.jpg`, "page-one");
+      return completedResult();
+    });
+    const adapter = createPopplerPdfDocumentAdapter({ executionPort, tempRoot });
+
+    await expect(
+      adapter.renderPages({
+        filePath: "/tmp/locked.pdf",
+        firstPage: 1,
+        lastPage: 1,
+        password: PASSWORD,
+        trace: trace(),
+      }),
+    ).resolves.toHaveLength(1);
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]).toContain("-upw");
+    expect(attempts[1]).toContain("-opw");
+    expect(attempts[1]).toContain(PASSWORD);
+  });
+
+  it("surfaces password_protected after both password variants fail", async () => {
+    const tempRoot = await temporaryRoot();
+    let renderAttempts = 0;
+    const executionPort = executionPortWith(async (request) => {
+      const args = request.command.mode === "argv" ? (request.command.args ?? []) : [];
+      if (args.includes("-v")) return completedResult();
+      renderAttempts += 1;
+      return failedResult("Command Line Error: Incorrect password");
+    });
+    const adapter = createPopplerPdfDocumentAdapter({ executionPort, tempRoot });
+
+    await expect(
+      adapter.renderPages({
+        filePath: "/tmp/locked.pdf",
+        firstPage: 1,
+        lastPage: 1,
+        password: PASSWORD,
+        trace: trace(),
+      }),
+    ).rejects.toMatchObject({
+      code: "password_protected",
+      message: "PDF password was rejected; the password may be incorrect or insufficient.",
+    });
+    expect(renderAttempts).toBe(2);
+  });
+
+  it("keeps the no-password message when rendering fails without a supplied password", async () => {
+    const tempRoot = await temporaryRoot();
+    const executionPort = executionPortWith(async (request) => {
+      const args = request.command.mode === "argv" ? (request.command.args ?? []) : [];
+      return args.includes("-v")
+        ? completedResult()
+        : failedResult("Command Line Error: Incorrect password");
+    });
+    const adapter = createPopplerPdfDocumentAdapter({ executionPort, tempRoot });
+
+    await expect(
+      adapter.renderPages({
+        filePath: "/tmp/locked.pdf",
+        firstPage: 1,
+        lastPage: 1,
+        trace: trace(),
+      }),
+    ).rejects.toMatchObject({
+      code: "password_protected",
+      message: "PDF is password-protected. Please provide an unprotected version.",
+    });
+  });
+
+  it("throws password_protected from getPageCount only on a non-zero exit with password stderr", async () => {
+    const executionPort = executionPortWith(async (request) => {
+      const args = request.command.mode === "argv" ? (request.command.args ?? []) : [];
+      if (args.includes("-upw")) return failedResult("Command Line Error: Incorrect password");
+      return completedResult({ stdout: "Pages:          4\n" });
+    });
+    const adapter = createPopplerPdfDocumentAdapter({ executionPort });
+
+    await expect(
+      adapter.getPageCount({ filePath: "/tmp/locked.pdf", password: "wrong", trace: trace() }),
+    ).rejects.toMatchObject({
+      code: "password_protected",
+      message: "PDF password was rejected; the password may be incorrect.",
+    });
+    // owner-password-only PDF（exit=0）不受影响，仍正常返回页数。
+    await expect(
+      adapter.getPageCount({ filePath: "/tmp/locked.pdf", trace: trace() }),
+    ).resolves.toBe(4);
+  });
+
+  it("keeps returning undefined for non-password pdfinfo failures", async () => {
+    const executionPort = executionPortWith(async () =>
+      failedResult("I/O Error: Couldn't open file '/tmp/missing.pdf'."),
+    );
+    const adapter = createPopplerPdfDocumentAdapter({ executionPort });
+
+    await expect(
+      adapter.getPageCount({ filePath: "/tmp/missing.pdf", trace: trace() }),
+    ).resolves.toBeUndefined();
+  });
+});
+
 function executionPortWith(run: (request: ExecutionRequest) => Promise<ExecutionResult>) {
   return { run: vi.fn(run) } as unknown as ExecutionPort & { run: ReturnType<typeof vi.fn> };
 }

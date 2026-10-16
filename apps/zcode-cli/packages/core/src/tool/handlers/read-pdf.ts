@@ -32,6 +32,10 @@ import type {
   ToolExecutionModelContext,
   ToolHandlerFailure,
 } from "../types.js";
+import {
+  announcePdfPageReadStart,
+  announcePdfPagesRecognized,
+} from "./read-pdf-progress.js";
 
 const READ_PROVIDER_PDF_DESCRIPTION_LINE =
   '- Reads PDFs via the `pages` parameter (e.g. "1-5", max 20 pages/request; required for PDFs over 10 pages).';
@@ -151,8 +155,15 @@ async function readNativePdf(
       }
     } catch (error) {
       rethrowPdfCancellation(error, context.abortSignal);
+      if (error instanceof PdfDocumentPortError) {
+        // 根因：adapter 现在把加密 PDF（pdfinfo exit≠0 + password stderr）分类为
+        // password_protected，原生路径必须转成稳定错误码快速失败，而不是把加密字节
+        // 直传 provider。普通解析失败仍以 undefined 表达并继续走 native 读取。
+        const errorCode = READ_ERROR_CODE_BY_PDF_DOCUMENT_ERROR[error.code];
+        if (errorCode !== undefined) return failure(errorCode, error.message);
+      }
       // 根因：adapter 已用 undefined 表达 pdfinfo 的普通执行或解析失败；继续吞掉
-      // port 抛出的未知异常会掩盖实现故障。这里只转换取消，其余异常保持原因向上冒泡。
+      // port 抛出的未知异常会掩盖实现故障。这里只转换取消与已知类别，其余异常保持原因向上冒泡。
       throw error;
     }
   }
@@ -218,6 +229,9 @@ async function readPdfPages(
   }
 
   try {
+    // 进度第一段：渲染前探测总页数（失败降级省略 total）；password_protected 会在此
+    // 触发装饰器问询并原样上抛，由下方 catch 统一映射错误码。
+    const totalPageCount = await announcePdfPageReadStart(context, filePath, trace, range);
     const renderedPages = await context.pdfDocumentPort.renderPages(
       {
         filePath,
@@ -262,6 +276,13 @@ async function readPdfPages(
       }),
     );
     preparedPages.sort((left, right) => left.pageNumber - right.pageNumber);
+    // 进度第二段：页图准备完成后累计已识别页（跨 Read 调用累加，runtime 持有状态）。
+    await announcePdfPagesRecognized(
+      context,
+      filePath,
+      totalPageCount,
+      preparedPages.map((page) => page.pageNumber),
+    );
     return {
       type: "parts",
       filePath,

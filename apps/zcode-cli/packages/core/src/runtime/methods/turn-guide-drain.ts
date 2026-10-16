@@ -20,6 +20,7 @@ export async function drainInlineGuideForNextRequest(
   const drained = await runtime.drainPendingInput({
     activeTurn,
     events: state.events,
+    modelInputFormat: state.model?.properties.inputFormat,
     traceContext: state.turnTraceContext,
   });
   if (!drained || drained.pendingInputIds.length === 0) return false;

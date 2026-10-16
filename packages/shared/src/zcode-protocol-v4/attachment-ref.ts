@@ -10,6 +10,8 @@ export const attachmentRefSchema = z
     bytes: z.number(),
     sourceKind: attachmentSourceKindSchema.optional(),
     messageCount: z.number().int().nonnegative().optional(),
+    /** PDF 等分页文档的页数徽标（展示元信息，additive 2026-10-16）。 */
+    pageCount: z.number().int().positive().optional(),
     previewRef: z.string().optional(),
   })
   .strict();

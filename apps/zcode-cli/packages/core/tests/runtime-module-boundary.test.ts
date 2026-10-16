@@ -33,7 +33,6 @@ const lineCountExemptFiles = new Set([
     "methods/turn-tools.ts",
     "methods/turn.ts",
     "methods/usage-observability.ts",
-    "helpers/attachment-media-resolver.ts",
     "helpers/compact-selection.ts",
     "helpers/provider-request-messages.ts",
   ].map((file) => join(repoRoot, "packages/core/src/runtime", file)),

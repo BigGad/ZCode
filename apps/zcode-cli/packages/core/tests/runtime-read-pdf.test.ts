@@ -3,10 +3,14 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   createSessionId,
+  PdfDocumentPortError,
+  SessionEventType,
   type FileSystemPort,
   type ImageProcessorPort,
   type ModelRequest,
   type PdfDocumentPort,
+  type SessionEvent,
+  type SessionEventStorePort,
 } from "@zcode/contracts";
 import { createTestAgentRuntime } from "./test-agent-runtime.js";
 import { createTestSessionEventStore } from "./test-event-store.js";
@@ -15,6 +19,7 @@ import { createTestModelFactory } from "./test-runtime-model.js";
 const WORKSPACE_PATH = join(tmpdir(), "zcode-runtime-read-pdf");
 const PDF_PATH = join(WORKSPACE_PATH, "report.pdf");
 const PDF_CONTENT = new Uint8Array(Buffer.from("%PDF-1.7\nfixture"));
+const PDF_PASSWORD = "pw-runtime-read-pdf";
 const TOOL_CALL_ID = "read-pdf";
 
 describe.each(["interactive", "subagent_child"] as const)(
@@ -38,7 +43,8 @@ describe.each(["interactive", "subagent_child"] as const)(
         expect.objectContaining({ filePath: PDF_PATH, firstPage: 2, lastPage: 3 }),
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
-      expect(getPageCount).not.toHaveBeenCalled();
+      // 阅读进度探测：pages 分支渲染前会 getPageCount 一次（失败降级省略 total）。
+      expect(getPageCount).toHaveBeenCalledTimes(1);
       expect(readBinaryFile).not.toHaveBeenCalled();
       const toolResult = requests[1]?.messages.find(
         (message) => message.role === "tool" && message.toolCallId === TOOL_CALL_ID,
@@ -83,12 +89,120 @@ describe.each(["interactive", "subagent_child"] as const)(
         ),
       });
     });
+
+    it("unlocks a password PDF via the decorator ask and emits Read progress events", async () => {
+      const lockedPort = (): PdfDocumentPort => ({
+        getPageCount: vi.fn<PdfDocumentPort["getPageCount"]>(async (request) => {
+          if (!request.password) {
+            throw new PdfDocumentPortError("password_protected", "locked");
+          }
+          return 4;
+        }),
+        renderPages: vi.fn<PdfDocumentPort["renderPages"]>(async (request) => {
+          if (!request.password) {
+            throw new PdfDocumentPortError("password_protected", "locked");
+          }
+          return Array.from(
+            { length: request.lastPage - request.firstPage + 1 },
+            (_, offset) => {
+              const pageNumber = request.firstPage + offset;
+              return {
+                pageNumber,
+                data: new Uint8Array(Buffer.from(`page-${pageNumber}`)),
+                mediaType: "image/jpeg" as const,
+              };
+            },
+          );
+        }),
+      });
+      const pdfDocumentPort = lockedPort();
+      const events: SessionEvent[] = [];
+      const eventStore = createTestSessionEventStore();
+      const originalAppend = eventStore.append.bind(eventStore);
+      eventStore.append = async (event) => {
+        events.push(event);
+        return originalAppend(event);
+      };
+      const permissionBroker = {
+        requestPermission: vi.fn(async (request: never) => {
+          const questions = (request as { input: { questions: Array<{ question: string }> } })
+            .input.questions;
+          return {
+            decision: "modify",
+            modifiedInput: { answers: { [questions[0]!.question]: PDF_PASSWORD } },
+          };
+        }),
+      };
+      const { requests } = await executePdfRead(taskType, {
+        pages: "1-2",
+        pdfDocumentPort,
+        eventStore,
+        permissionBroker,
+      });
+
+      // 装饰器：探测（无密码失败）→ 问询 → 带密码重试成功；renderPages 同样带密码。
+      expect(pdfDocumentPort.getPageCount).toHaveBeenCalledTimes(2);
+      expect(pdfDocumentPort.getPageCount.mock.calls[1]![0]).toMatchObject({
+        password: PDF_PASSWORD,
+      });
+      // renderPages 第一次无密码失败（缓存已由探测段建立）→ 第二次带密码成功。
+      expect(pdfDocumentPort.renderPages).toHaveBeenCalledTimes(2);
+      expect(pdfDocumentPort.renderPages.mock.calls[1]![0]).toMatchObject({
+        password: PDF_PASSWORD,
+      });
+      const toolResult = requests[1]?.messages.find(
+        (message) => message.role === "tool" && message.toolCallId === TOOL_CALL_ID,
+      );
+      expect(toolResult).toMatchObject({ role: "tool", toolName: "Read", isError: false });
+
+      // 进度事件（transient）：开始段 + 完成段；密码不出现在任何事件里。
+      const progressEvents = events.filter(
+        (event) => event.type === SessionEventType.ToolCallProgress,
+      );
+      expect(progressEvents.length).toBeGreaterThanOrEqual(2);
+      expect(progressEvents[0]?.payload).toMatchObject({
+        toolName: "Read",
+        total: 4,
+        message: "第 1-2 页 / 共 4 页",
+      });
+      const completion = progressEvents.at(-1)?.payload as { progress?: number; total?: number };
+      expect(completion).toMatchObject({ progress: 2, total: 4 });
+      expect(JSON.stringify(events)).not.toContain(PDF_PASSWORD);
+    });
+
+    it("fast-fails a password PDF with a clean error when the broker denies", async () => {
+      const getPageCount = vi.fn<PdfDocumentPort["getPageCount"]>(async () => {
+        throw new PdfDocumentPortError("password_protected", "locked");
+      });
+      const renderPages = vi.fn<PdfDocumentPort["renderPages"]>();
+      const { requests } = await executePdfRead(taskType, {
+        pages: "1-2",
+        pdfDocumentPort: { getPageCount, renderPages },
+      });
+
+      // deny broker（测试默认 broker）→ 装饰器原样上抛，不重试不循环。
+      expect(getPageCount).toHaveBeenCalledTimes(1);
+      expect(renderPages).not.toHaveBeenCalled();
+      expect(
+        requests[1]?.messages.find(
+          (message) => message.role === "tool" && message.toolCallId === TOOL_CALL_ID,
+        ),
+      ).toMatchObject({
+        isError: true,
+        content: expect.stringContaining("locked"),
+      });
+    });
   },
 );
 
 async function executePdfRead(
   taskType: "interactive" | "subagent_child",
-  options: { pages?: string; pdfDocumentPort: PdfDocumentPort },
+  options: {
+    pages?: string;
+    pdfDocumentPort: PdfDocumentPort;
+    eventStore?: SessionEventStorePort;
+    permissionBroker?: unknown;
+  },
 ) {
   const requests: ModelRequest[] = [];
   const readBinaryFile = vi.fn<FileSystemPort["readBinaryFile"]>(async (request) => ({
@@ -130,10 +244,11 @@ async function executePdfRead(
       compact: { enabled: false },
     },
     {
-      eventStore: createTestSessionEventStore(),
+      eventStore: options.eventStore ?? createTestSessionEventStore(),
       fileSystemPort,
       imageProcessorPort,
       pdfDocumentPort: options.pdfDocumentPort,
+      ...(options.permissionBroker === undefined ? {} : { permissionBroker: options.permissionBroker }),
       modelFactory: createTestModelFactory({
         async generateText(request) {
           requests.push(request);

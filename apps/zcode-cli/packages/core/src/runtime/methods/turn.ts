@@ -37,10 +37,11 @@ import {
   buildRuntimeUserEntriesFromTurn,
   buildUserContentFromTurn,
   logResolvedTurnAttachments,
-  resolveTurnAttachments,
   summarizeTurnAttachmentsForEvent,
   runtimeMetadataForSyntheticUserMessageSource,
 } from "../helpers/index.js";
+import { resolveTurnAttachments } from "../helpers/attachments.js";
+import { emitTurnAttachmentPageCounts } from "./turn-attachment-page-counts.js";
 import type { ActiveTurnSteeringState, ExecuteTurnOptions, TurnResult } from "../types.js";
 import type { ActiveTurnStartReservation } from "../types.js";
 import type { AgentRuntimeInternal } from "../internal.js";
@@ -441,17 +442,29 @@ export async function executeTurnCommand(
         injectReferencedSessionContextReminderIntoMessageHistory.call(this, input, options);
         // 话题原文由标准文本附件按需读取，可信来源归档不能再次生成隐藏上下文。
         injectDateChangeReminderIntoMessageHistory.call(this);
+        // 密码问询已下沉到 pdfDocumentPort 装饰器（pdf-password-port.ts），这里普通解析即可。
         const resolvedAttachments = await resolveTurnAttachments(attachments, {
           abortSignal: turnAbortSignal,
           artifactStore: this.artifactStore,
           fileSystemPort: this.fileSystemPort,
           imageProcessorPort: this.imageProcessorPort,
+          modelInputFormat: (submissionModel ?? admittedModel)?.properties.inputFormat,
+          pdfDocumentPort: this.pdfDocumentPort,
           sessionId: this.sessionId,
           traceContext: turnTraceContext,
           turnId,
           workingDirectory: this.workingDirectory,
+          workspaceKey: this.getWorkspaceKey(),
+          workspaceResourceIndexPort: this.workspaceResourceIndexPort,
         });
         logResolvedTurnAttachments(this.logger, turnTraceContext, resolvedAttachments);
+        // 附件页数徽标：resolve 后补发的展示元信息（仅当有 PDF 已知页数）。
+        await emitTurnAttachmentPageCounts.call(this, {
+          messageId: userMessageId,
+          resolved: resolvedAttachments,
+          traceContext: turnTraceContext,
+          turnId,
+        });
         const sharedContextRefs = options?.sharedContextRefs ?? options?.intent?.sharedContextRefs;
         if (sharedContextRefs && sharedContextRefs.length > 0) {
           const [reference] = sharedContextRefs;

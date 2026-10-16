@@ -38,6 +38,7 @@ import type {
   ToolCallScheduledPayload,
   ToolCallStartedPayload,
   ToolResultDisplayPayload,
+  TurnAttachmentMetaUpdatedPayload,
   TurnCompletePayload,
   TurnErrorPayload,
   TurnInputIntentMetadata,
@@ -63,6 +64,7 @@ import {
   clearSettledOutputPreviews,
   projectToolActivity,
 } from "./product-projection-bash-progress.js";
+import { projectTurnAttachmentMetaUpdated } from "./product-projection-attachment-meta.js";
 // review 单调性裁决单一来源；projection 只实现“应用策略”（advance/no_current 接受，
 // 其余忽略；跨 flow 等 onSessionResumed 清空）。
 // （改直连 monotonicity subpath；discovery barrel 的该 re-export
@@ -1484,6 +1486,8 @@ export class ProductProjection {
       case SessionEventType.HookRunFailed:
       case SessionEventType.HookRunBlocked:
         return this.onHookRunLifecycle(event);
+      case SessionEventType.TurnAttachmentMetaUpdated:
+        return this.onTurnAttachmentMetaUpdated(event);
       case SessionEventType.TurnSteerQueued:
         return this.onTurnSteerQueued(event);
       case SessionEventType.TurnSteerDeliveryChanged:
@@ -2775,6 +2779,14 @@ export class ProductProjection {
         row: { ...row, highspeed: { ...row.highspeed, ...payload.highspeed } },
       },
     ];
+  }
+
+  /** 附件页数徽标：处理逻辑独立成模块（仿 bash-progress 先例），此处只做委托。 */
+  private onTurnAttachmentMetaUpdated(event: SessionEvent): ConversationDelta[] {
+    return projectTurnAttachmentMetaUpdated(event.payload as TurnAttachmentMetaUpdatedPayload, {
+      rows: this.snapshot.rows.window,
+      productTurnIdByRuntimeTurnId: this.productTurnIdByRuntimeTurnId,
+    });
   }
 
   private onTurnExecutionModelFallback(event: SessionEvent): ConversationDelta[] {

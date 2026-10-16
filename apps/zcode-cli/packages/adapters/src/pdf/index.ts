@@ -40,7 +40,12 @@ class PopplerPdfDocumentAdapter implements PdfDocumentPort {
   ): Promise<number | undefined> {
     const result = await this.options.executionPort.run(
       {
-        command: { mode: "argv", file: "pdfinfo", args: [request.filePath] },
+        command: {
+          mode: "argv",
+          file: "pdfinfo",
+          // 密码仅经 argv 传给子进程（poppler 无 stdin/env 通道）；ps 可见性在 spec 安全节已声明。
+          args: request.password ? ["-upw", request.password, request.filePath] : [request.filePath],
+        },
         timeoutMs: READ_PDF_INFO_TIMEOUT_MS,
         trace: request.trace,
       },
@@ -49,7 +54,20 @@ class PopplerPdfDocumentAdapter implements PdfDocumentPort {
     if (result.cancelled || options?.signal?.aborted) {
       throw new PdfDocumentPortError("cancelled", "PDF inspection was cancelled.");
     }
-    if (result.status !== "completed" || result.exitCode !== 0) return undefined;
+    if (result.status !== "completed" || result.exitCode !== 0) {
+      // 根因：加密 PDF 的 pdfinfo exit≠0 且 stderr 含 password；原先返回 undefined 会让
+      // 调用方把加密文件当普通文件处理（如 Read 原生路径直传加密字节给 provider）。
+      // 仅在 exit≠0 时抛出，exit=0 的 owner-password-only 可渲染 PDF 不受影响。
+      if (/password/iu.test(result.stderr.text)) {
+        throw new PdfDocumentPortError(
+          "password_protected",
+          request.password
+            ? "PDF password was rejected; the password may be incorrect."
+            : "PDF is password-protected. A password is required to open it.",
+        );
+      }
+      return undefined;
+    }
     const match = /^Pages:\s+(\d+)\s*$/imu.exec(result.stdout.text);
     const pageCount = Number(match?.[1]);
     return Number.isSafeInteger(pageCount) && pageCount >= 0 ? pageCount : undefined;
@@ -72,8 +90,8 @@ class PopplerPdfDocumentAdapter implements PdfDocumentPort {
     }
     const outputPrefix = join(directory, "page");
     let operationFailed = false;
-    try {
-      const result = await this.options.executionPort.run(
+    const runRender = (passwordFlag: "-upw" | "-opw") =>
+      this.options.executionPort.run(
         {
           command: {
             mode: "argv",
@@ -86,6 +104,8 @@ class PopplerPdfDocumentAdapter implements PdfDocumentPort {
               String(request.firstPage),
               "-l",
               String(request.lastPage),
+              // 单密码字段双变体：先按 user password (-upw) 尝试，密码错误再按 owner password (-opw) 重试。
+              ...(request.password ? [passwordFlag, request.password] : []),
               request.filePath,
               outputPrefix,
             ],
@@ -95,7 +115,22 @@ class PopplerPdfDocumentAdapter implements PdfDocumentPort {
         },
         options?.signal ? { signal: options.signal } : undefined,
       );
-      assertRenderSucceeded(result, request);
+    try {
+      let result = await runRender("-upw");
+      try {
+        assertRenderSucceeded(result, request);
+      } catch (error) {
+        // 仅密码类失败值得换 owner-password 变体重试一次；其他失败重试只会重复成本。
+        if (
+          !request.password ||
+          !(error instanceof PdfDocumentPortError) ||
+          error.code !== "password_protected"
+        ) {
+          throw error;
+        }
+        result = await runRender("-opw");
+        assertRenderSucceeded(result, request);
+      }
       return await readRenderedPages(directory, options?.signal);
     } catch (error) {
       operationFailed = true;
@@ -171,7 +206,9 @@ function assertRenderSucceeded(
   if (/password/iu.test(stderr)) {
     throw new PdfDocumentPortError(
       "password_protected",
-      "PDF is password-protected. Please provide an unprotected version.",
+      request.password
+        ? "PDF password was rejected; the password may be incorrect or insufficient."
+        : "PDF is password-protected. Please provide an unprotected version.",
     );
   }
   const pageRangeMatch = /Wrong page range given[\s\S]*last page \((\d+)\)/iu.exec(stderr);

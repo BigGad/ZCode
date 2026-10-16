@@ -193,3 +193,97 @@ function collectTextNodes(node: unknown): Array<{ style: Record<string, unknown>
   visit(node);
   return lines;
 }
+
+test("stores ToolCallProgress message as running progress text", () => {
+  const state = createToolProjectionState("/workspace/project");
+  state.apply(
+    sessionEvent(SessionEventType.ToolCallStarted, {
+      toolCallId: "tool-1",
+      toolName: "Read",
+    }),
+  );
+  state.apply(
+    sessionEvent(SessionEventType.ToolCallProgress, {
+      message: "第 1-20 页 / 共 42 页",
+      toolCallId: "tool-1",
+      toolName: "Read",
+    }),
+  );
+
+  const part = onlyToolPart(state.messages);
+  assert.equal(part.status, "running");
+  assert.equal(part.progressMessage, "第 1-20 页 / 共 42 页");
+});
+
+test("keeps the previous progress message on progress events without one", () => {
+  const state = createToolProjectionState("/workspace/project");
+  state.apply(
+    sessionEvent(SessionEventType.ToolCallStarted, {
+      toolCallId: "tool-1",
+      toolName: "Read",
+    }),
+  );
+  state.apply(
+    sessionEvent(SessionEventType.ToolCallProgress, {
+      message: "已识别 20/42 页",
+      toolCallId: "tool-1",
+    }),
+  );
+  state.apply(
+    sessionEvent(SessionEventType.ToolCallProgress, {
+      elapsedMs: 1200,
+      toolCallId: "tool-1",
+    }),
+  );
+
+  const part = onlyToolPart(state.messages);
+  assert.equal(part.status, "running");
+  assert.equal(part.progressMessage, "已识别 20/42 页");
+});
+
+test("clears the progress message on terminal tool states", () => {
+  const state = createToolProjectionState("/workspace/project");
+  state.apply(
+    sessionEvent(SessionEventType.ToolCallStarted, {
+      toolCallId: "tool-1",
+      toolName: "Read",
+    }),
+  );
+  state.apply(
+    sessionEvent(SessionEventType.ToolCallProgress, {
+      message: "已识别 20/42 页",
+      toolCallId: "tool-1",
+    }),
+  );
+  state.apply(
+    sessionEvent(SessionEventType.ToolCallResult, {
+      result: { content: "ok" },
+      toolCallId: "tool-1",
+    }),
+  );
+
+  const part = onlyToolPart(state.messages);
+  assert.equal(part.status, "completed");
+  assert.equal(part.progressMessage, undefined);
+});
+
+test("renders the progress line only while the tool is running", () => {
+  const runningPart: ToolTranscriptPart = {
+    detailLines: [],
+    progressMessage: "已识别 20/42 页",
+    status: "running",
+    toolCallId: "tool-1",
+    toolName: "Read",
+    type: "tool",
+  };
+  const runningLines = collectTextNodes(
+    ToolTranscriptPartView({ part: runningPart, terminalWidth: 100 }),
+  );
+  assert.ok(runningLines.some((line) => line.text.includes("已识别 20/42 页")));
+
+  const completedPart: ToolTranscriptPart = { ...runningPart, status: "completed" };
+  const completedLines = collectTextNodes(
+    ToolTranscriptPartView({ part: completedPart, terminalWidth: 100 }),
+  );
+  assert.ok(!completedLines.some((line) => line.text.includes("已识别 20/42 页")));
+});

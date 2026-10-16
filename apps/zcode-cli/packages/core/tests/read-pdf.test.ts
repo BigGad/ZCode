@@ -3,6 +3,7 @@ import {
   CoreErrorType,
   READ_PDF_EXTRACT_MAX_INPUT_BYTES,
   READ_PDF_NATIVE_MAX_INPUT_BYTES,
+  SessionEventType,
   createModelId,
   createModelProviderId,
   createSessionId,
@@ -15,7 +16,7 @@ import {
   type PdfDocumentPort,
 } from "@zcode/contracts";
 import { readHandler, readToolEntry } from "../src/tool/handlers/read.js";
-import type { ToolExecutionContext } from "../src/tool/types.js";
+import type { PdfReadProgressMap, ToolExecutionContext } from "../src/tool/types.js";
 import { createTestRuntimeModel } from "./test-runtime-model.js";
 
 const PDF_PATH = "/tmp/report.pdf";
@@ -261,6 +262,29 @@ describe("Read PDF handling", () => {
     expect(result.output).toMatchObject({ type: "pdf", filePath: PDF_PATH });
   });
 
+  it("fast-fails a native read of a password-protected PDF before sending bytes to the provider", async () => {
+    const readBinaryFile = vi.fn();
+    const result = await executeReadPdf(
+      { file_path: PDF_PATH },
+      { supportsPdf: true, supportsImages: false },
+      {
+        getPageCount: async () => {
+          throw new PdfDocumentPortError("password_protected", "Incorrect password");
+        },
+      },
+      fileSystemPortWith({ readBinaryFile }),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.output).toMatchObject({
+      result: false,
+      errorCode: ReadErrorCode.PDF_PASSWORD_PROTECTED,
+      message: "Incorrect password",
+    });
+    // 加密字节不得直传 provider。
+    expect(readBinaryFile).not.toHaveBeenCalled();
+  });
+
   it("propagates native page-count cancellation while the outer signal is still live", async () => {
     await expect(
       executeReadPdf(
@@ -305,7 +329,126 @@ describe("Read PDF handling", () => {
     const output = await readHandler({ file_path: PDF_PATH, pages: "1" }, context);
     expect(output).toMatchObject({ type: "text", filePath: PDF_PATH });
   });
+
+  it("emits start and completion progress with the probed total page count", async () => {
+    const { events } = await executeReadPdfWithProgress(
+      { file_path: PDF_PATH, pages: "2-3" },
+      {
+        getPageCount: async () => 5,
+        renderPages: async () => [
+          { pageNumber: 2, data: new Uint8Array(Buffer.from("page-two")), mediaType: "image/jpeg" },
+          {
+            pageNumber: 3,
+            data: new Uint8Array(Buffer.from("page-three")),
+            mediaType: "image/jpeg",
+          },
+        ],
+      },
+    );
+
+    const progress = events.filter((event) => event.type === SessionEventType.ToolCallProgress);
+    expect(progress).toHaveLength(2);
+    expect(progress[0]!.payload).toMatchObject({
+      toolName: "Read",
+      total: 5,
+      message: "第 2-3 页 / 共 5 页",
+    });
+    expect(progress[1]!.payload).toMatchObject({
+      toolName: "Read",
+      progress: 2,
+      total: 5,
+      message: "已识别 2/5 页 · 第 2-3 页完成",
+    });
+  });
+
+  it("degrades to total-less progress when the page-count probe fails", async () => {
+    const { events } = await executeReadPdfWithProgress(
+      { file_path: PDF_PATH, pages: "1" },
+      {
+        getPageCount: async () => {
+          throw new PdfDocumentPortError("unavailable", "no poppler");
+        },
+        renderPages: async () => [
+          { pageNumber: 1, data: new Uint8Array(Buffer.from("page-one")), mediaType: "image/jpeg" },
+        ],
+      },
+    );
+
+    const progress = events.filter((event) => event.type === SessionEventType.ToolCallProgress);
+    expect(progress[0]!.payload).toEqual({
+      toolCallId: expect.any(String),
+      toolName: "Read",
+      message: "第 1-1 页",
+    });
+    expect(progress[1]!.payload).toMatchObject({ progress: 1, message: "已识别 1 页 · 第 1-1 页完成" });
+  });
+
+  it("propagates a password-protected probe instead of degrading to a second ask", async () => {
+    const result = await executeReadPdfWithProgress(
+      { file_path: PDF_PATH, pages: "1" },
+      {
+        getPageCount: async () => {
+          throw new PdfDocumentPortError("password_protected", "locked");
+        },
+        renderPages: async () => [],
+      },
+    );
+    expect(isHandlerFailure(result.output)).toBe(true);
+    expect(result.output).toMatchObject({ errorCode: ReadErrorCode.PDF_PASSWORD_PROTECTED });
+  });
+
+  it("accumulates recognized pages across reads of the same file", async () => {
+    const sharedProgress: PdfReadProgressMap = new Map();
+    const page = (pageNumber: number) => ({
+      pageNumber,
+      data: new Uint8Array(Buffer.from(`page-${pageNumber}`)),
+      mediaType: "image/jpeg" as const,
+    });
+    const first = await executeReadPdfWithProgress(
+      { file_path: PDF_PATH, pages: "1-2" },
+      { getPageCount: async () => 6, renderPages: async () => [page(1), page(2)] },
+      sharedProgress,
+    );
+    const second = await executeReadPdfWithProgress(
+      { file_path: PDF_PATH, pages: "3-4" },
+      { getPageCount: async () => 6, renderPages: async () => [page(3), page(4)] },
+      sharedProgress,
+    );
+
+    const secondBatch = second.events.filter(
+      (event) => event.type === SessionEventType.ToolCallProgress,
+    );
+    expect(secondBatch[1]!.payload).toMatchObject({
+      progress: 4,
+      total: 6,
+      message: "已识别 4/6 页 · 第 3-4 页完成",
+    });
+    expect(first.events).toHaveLength(2);
+  });
 });
+
+async function executeReadPdfWithProgress(
+  input: unknown,
+  pdfPort: Partial<PdfDocumentPort>,
+  sharedProgress?: PdfReadProgressMap,
+) {
+  const context = contextWith(pdfPort);
+  context.model = createTestRuntimeModel({
+    generateText: async () => ({ finishReason: "stop", text: "", usage: {} }),
+    inputFormat: { supportsPdf: true, supportsImage: true },
+    modelId: "pdf-progress-model",
+  });
+  const events: Array<{ type: SessionEventType; payload: Record<string, unknown> }> = [];
+  context.emitEvent = async (event) => {
+    events.push({
+      type: event.type,
+      payload: event.payload as Record<string, unknown>,
+    });
+  };
+  context.pdfReadProgress = sharedProgress ?? new Map();
+  const output = await readHandler(input, context);
+  return { output, events };
+}
 
 async function executeReadPdf(
   input: unknown,

@@ -38,6 +38,19 @@ export function ToolTranscriptPartView({
       },
     },
     h("text", { style: { fg: part.title ? palette.muted : statusColor } }, title),
+    // 运行中进度文案（ToolCallProgress.message）；completed/failed 已在事件应用层清除，这里再按状态兜底。
+    ...(part.status === "running" && part.progressMessage
+      ? [
+          h(
+            "text",
+            {
+              key: "progress-message",
+              style: { fg: statusColor },
+            },
+            `${TOOL_DETAIL_INDENT}${truncateDisplay(part.progressMessage, terminalWidth)}`,
+          ),
+        ]
+      : []),
     ...part.detailLines.map((line, index) =>
       h(
         "text",

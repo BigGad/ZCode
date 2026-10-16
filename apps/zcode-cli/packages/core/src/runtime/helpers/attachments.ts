@@ -4,6 +4,8 @@ import type {
   FilePartSource,
   FileSystemPort,
   ImageProcessorPort,
+  ModelInputFormat,
+  PdfDocumentPort,
   SessionId,
   ToolArtifactStorePort,
   TraceContext,
@@ -11,15 +13,14 @@ import type {
   TurnAttachmentMeta,
   TurnState,
   TurnId,
+  WorkspaceResourceIndexPort,
 } from "../deps.js";
 import { readTextFileForModel } from "../../tool/handlers/read-text.js";
 import type { ResolvedTurnAttachment } from "../types.js";
 import { readInlineAttachmentContent } from "./attachment-artifacts.js";
 import { parseDataUrlHeader } from "./attachment-data-url.js";
-import {
-  resolveInlineMediaAttachment,
-  resolveLocalMediaAttachment,
-} from "./attachment-media-resolver.js";
+import { resolveInlineMediaAttachment } from "./inline-media-resolver.js";
+import { resolveLocalMediaAttachment } from "./local-media-resolver.js";
 import { resolvedPlaceholderAttachment } from "./attachment-placeholder.js";
 import { inferImageMimeFromPath } from "./attachment-image.js";
 import {
@@ -35,10 +36,14 @@ type ResolveAttachmentOptions = {
   artifactStore?: ToolArtifactStorePort;
   fileSystemPort?: FileSystemPort;
   imageProcessorPort?: ImageProcessorPort;
+  modelInputFormat?: ModelInputFormat;
+  pdfDocumentPort?: PdfDocumentPort;
   sessionId?: SessionId;
   traceContext: TraceContext;
   turnId?: TurnId;
   workingDirectory: string;
+  workspaceKey?: string;
+  workspaceResourceIndexPort?: WorkspaceResourceIndexPort;
 };
 
 /**

@@ -56,12 +56,18 @@ export function applyToolTranscriptEvent(
     event.type === SessionEventType.ToolCallStarted ||
     event.type === SessionEventType.ToolCallProgress
   ) {
+    // 进度文案（如 Read PDF 的「第 1-20 页 / 共 N 页」）只在携带 message 的事件上更新，
+    // 其余 ToolCallProgress（elapsed/pid 等）保留已有文案不被清空。
+    const progressMessage = stringField(payload, "message");
     handlers.setMessages((current) =>
       updateOrAppendToolPart(
         current,
         toolCallId,
         toolName,
-        { status: "running" },
+        {
+          status: "running",
+          ...(progressMessage ? { progressMessage } : {}),
+        },
         assistantMessageId,
       ),
     );
@@ -75,6 +81,8 @@ export function applyToolTranscriptEvent(
         toolCallId,
         toolName,
         {
+          // 终态清除进度文案，避免已完成工具行残留过期的运行中提示。
+          progressMessage: undefined,
           resultDisplay: resultDisplayFromPayload(payload),
           status: "completed",
         },
@@ -92,6 +100,7 @@ export function applyToolTranscriptEvent(
         toolName,
         {
           error: eventErrorMessage(payload),
+          progressMessage: undefined,
           status: "failed",
         },
         assistantMessageId,

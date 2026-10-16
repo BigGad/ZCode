@@ -2,6 +2,11 @@ import type { TraceContext } from "../tracing/tracer.js";
 
 export interface PdfDocumentPageCountRequest {
   filePath: string;
+  /**
+   * 加密 PDF 的解密密码；仅内存传递给 adapter 子进程参数，
+   * 禁止写入事件、元数据、日志或任何持久化边界（见 message-attachments.md 密码节）。
+   */
+  password?: string;
   trace: TraceContext;
 }
 

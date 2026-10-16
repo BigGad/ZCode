@@ -6146,6 +6146,7 @@ const enUS: Record<string, string> = {
   "chat.attachments.preview.openVideo": "Open video preview",
   "chat.attachments.preview.openText": "Open text attachment",
   "chat.attachments.topicHistory": "Topic history · {count} messages",
+  "chat.attachments.pdfPageCount": "{count} pages",
   "chat.attachments.preview.openPdf": "Open PDF preview",
   "chat.attachments.preview.title": "Image preview",
   "chat.attachments.preview.pdfLoading": "Loading PDF preview…",

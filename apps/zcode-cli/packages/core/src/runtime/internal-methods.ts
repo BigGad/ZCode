@@ -1,6 +1,7 @@
 import type {
   CollaborationMode,
   Model,
+  ModelInputFormat,
   ModelInputMessage,
   ModelSelection,
   ModelSelectionOrigin,
@@ -82,6 +83,7 @@ export interface AgentRuntimeCoreMethods {
   getSessionModelSelection(): ModelSelection | undefined;
   setSessionModelSelection(selection: ModelSelection | undefined): void;
   getProjectId(): ProjectId;
+  getWorkspaceKey(): string;
   setWorkingDirectory(cwd: string): void;
   ensureSessionPersistedForExternalActivity(
     input: string,
@@ -146,6 +148,8 @@ export interface AgentRuntimeCoreMethods {
   drainPendingInput(options: {
     activeTurn: ActiveTurnSteeringState;
     events: SessionEvent[];
+    /** 当前轮执行模型的输入能力；steer 附件按它决定 PDF 页图渲染分发。 */
+    modelInputFormat?: ModelInputFormat;
     traceContext: TraceContext;
   }): Promise<DrainedPendingInputDiagnostics | undefined>;
   enqueueRuntimeCommand(command: RuntimeCommand): void;

@@ -43,6 +43,7 @@ import type { ToolSchedule } from "../scheduler.js";
 import type {
   BackgroundTaskControlPort,
   ExecutableToolCall,
+  PdfReadProgressMap,
   ReadFileStateMap,
   ToolBatchEvent,
   ToolExecutionResult,
@@ -118,6 +119,8 @@ export interface ToolExecutorOptions {
   modelCatalogPort?: ModelCatalogPort;
   runtimeTaskRegistry?: RuntimeTaskRegistry;
   readFileState?: ReadFileStateMap;
+  /** PDF 分页阅读进度（runtime 持有，read-pdf.ts 唯一写入者）。 */
+  pdfReadProgress?: PdfReadProgressMap;
   /** 技能门的探针（ToolInputResolutionContext.hasLoadedSkill）；runtime 按 provider 可见历史回答。 */
   hasLoadedSkill?: (skillName: string) => boolean;
   subagentBackgroundBashMaxMs?: number;
@@ -232,6 +235,7 @@ export interface ToolExecutorDeps {
   modelCatalogPort?: ModelCatalogPort;
   runtimeTaskRegistry?: RuntimeTaskRegistry;
   readFileState: ReadFileStateMap;
+  pdfReadProgress?: PdfReadProgressMap;
   hasLoadedSkill?: (skillName: string) => boolean;
   subagentBackgroundBashMaxMs?: number;
   bashShellSelection?: ExecutionShellSelection;

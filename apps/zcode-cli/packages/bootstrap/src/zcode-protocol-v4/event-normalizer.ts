@@ -403,6 +403,8 @@ function normalizeAttachment(attachment: TurnAttachmentMeta): CanonicalTurnAttac
     fileName: attachment.fileName,
     mime: attachment.mime,
     bytes: attachment.bytes,
+    // 冷恢复经 TurnStarted.attachments 携带页数徽标；live 链路由 TurnAttachmentMetaUpdated 补发。
+    ...(attachment.pageCount ? { pageCount: attachment.pageCount } : {}),
   };
 }
 

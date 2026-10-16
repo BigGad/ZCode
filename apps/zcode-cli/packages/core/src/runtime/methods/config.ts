@@ -109,6 +109,17 @@ export function getProjectId(this: AgentRuntimeInternal): ProjectId {
   return projectIdFromDirectory(this.workspaceRoot);
 }
 
+export function getWorkspaceKey(this: AgentRuntimeInternal): string {
+  // 资源库隔离键统一为 `workspaceIdentity?.trim() || workspacePath`：
+  // 远端用上游不透明身份（memory.workspaceIdentity），本地退回 workspacePath / workspaceRoot。
+  // 与 getProjectId 同理由：身份不能随工具内 cd 漂移，故取 workspaceRoot 而非 workingDirectory。
+  return (
+    this.config.memory?.workspaceIdentity?.trim() ||
+    this.config.workspacePath ||
+    this.workspaceRoot
+  );
+}
+
 export function setWorkingDirectory(this: AgentRuntimeInternal, cwd: string): void {
   // Bash cwd 持久化只应影响当前 runtime 会话，不能改变工作区身份。
   this.workingDirectory = cwd;

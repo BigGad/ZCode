@@ -5871,6 +5871,7 @@ const zhCN: Record<string, string> = {
   "chat.attachments.preview.openVideo": "打开视频预览",
   "chat.attachments.preview.openText": "打开文本附件",
   "chat.attachments.topicHistory": "话题历史 · {count} 条消息",
+  "chat.attachments.pdfPageCount": "{count} 页",
   "chat.attachments.preview.openPdf": "打开 PDF 预览",
   "chat.attachments.preview.title": "图片预览",
   "chat.attachments.preview.pdfLoading": "正在加载 PDF 预览…",

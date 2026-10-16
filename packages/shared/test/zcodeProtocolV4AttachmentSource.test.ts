@@ -48,4 +48,51 @@ describe("V4 attachment source across row transport", () => {
       expect(row.attachments).toEqual([attachment]);
     },
   );
+  it("preserves the optional PDF pageCount badge on the user row", () => {
+    const attachment = {
+      ref: "/doc/volume.pdf",
+      fileName: "volume.pdf",
+      mime: "application/pdf",
+      bytes: 1024,
+      pageCount: 42,
+    };
+    const row = userInputRowSchema.parse({
+      rowId: 2,
+      turnId: "turn-2",
+      createdAt: 2,
+      createdAtSeq: 2,
+      kind: "userInput",
+      origin: "realUser",
+      text: "阅卷",
+      attachments: [attachment],
+    });
+    expect(row.attachments).toEqual([attachment]);
+    // 无页数的旧附件必须原样通过（additive 向后兼容）；页数必须为正整数。
+    expect(
+      userInputRowSchema.parse({
+        rowId: 3,
+        turnId: "turn-3",
+        createdAt: 3,
+        createdAtSeq: 3,
+        kind: "userInput",
+        origin: "realUser",
+        text: "legacy",
+        attachments: [{ ref: "/a.pdf", fileName: "a.pdf", mime: "application/pdf", bytes: 1 }],
+      }).attachments,
+    ).toEqual([{ ref: "/a.pdf", fileName: "a.pdf", mime: "application/pdf", bytes: 1 }]);
+    expect(() =>
+      userInputRowSchema.parse({
+        rowId: 4,
+        turnId: "turn-4",
+        createdAt: 4,
+        createdAtSeq: 4,
+        kind: "userInput",
+        origin: "realUser",
+        text: "invalid",
+        attachments: [
+          { ref: "/b.pdf", fileName: "b.pdf", mime: "application/pdf", bytes: 1, pageCount: 0 },
+        ],
+      }),
+    ).toThrow();
+  });
 });

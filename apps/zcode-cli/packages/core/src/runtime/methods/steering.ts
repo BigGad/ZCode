@@ -17,6 +17,7 @@ import {
 import type {
   CollaborationMode,
   MessageId,
+  ModelInputFormat,
   ModelSelection,
   ModelSelectionOrigin,
   PendingSteerInputInfo,
@@ -37,8 +38,9 @@ import {
   measureUtf8Bytes,
   MAX_TURN_STEER_INPUT_BYTES,
   previewInput,
-  resolveTurnAttachments,
 } from "../helpers/index.js";
+import { resolveTurnAttachments } from "../helpers/attachments.js";
+import { emitTurnAttachmentPageCounts } from "./turn-attachment-page-counts.js";
 import type {
   ActiveTurnKind,
   ActiveTurnSteeringState,
@@ -1149,6 +1151,7 @@ export async function drainPendingInput(
   options: {
     activeTurn: ActiveTurnSteeringState;
     events: SessionEvent[];
+    modelInputFormat?: ModelInputFormat;
     traceContext: TraceContext;
   },
 ): Promise<DrainedPendingInputDiagnostics | undefined> {
@@ -1206,14 +1209,26 @@ async function drainPendingInputUnlocked(
     // 投递语义缺省按 queue（排队消费=独立轮）；guide 由 v4 命令面
     // 按 inputRouting 显式标注。落到持久 metadata 供冷恢复还原同一切分。
     const delivery = pendingInput.delivery ?? "queue";
+    // 密码问询已下沉到 pdfDocumentPort 装饰器（pdf-password-port.ts），这里普通解析即可。
     const resolvedAttachments = await resolveTurnAttachments(pendingInput.attachments, {
       artifactStore: this.artifactStore,
       fileSystemPort: this.fileSystemPort,
       imageProcessorPort: this.imageProcessorPort,
+      modelInputFormat: options.modelInputFormat,
+      pdfDocumentPort: this.pdfDocumentPort,
       sessionId: this.sessionId,
       traceContext: drainTraceContext,
       turnId: options.activeTurn.turnId,
       workingDirectory: this.workingDirectory,
+      workspaceKey: this.getWorkspaceKey(),
+      workspaceResourceIndexPort: this.workspaceResourceIndexPort,
+    });
+    // 附件页数徽标：resolve 后补发的展示元信息（仅当有 PDF 已知页数）。
+    await emitTurnAttachmentPageCounts.call(this, {
+      messageId,
+      resolved: resolvedAttachments,
+      traceContext: drainTraceContext,
+      turnId: options.activeTurn.turnId,
     });
     // 只在实际 guide 消费且无附件时固化新标记；审批反馈仍走原合同。
     const inputPresentation =

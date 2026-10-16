@@ -14,6 +14,7 @@ import {
   MessageHistoryImpl,
   PermissionService,
   ToolScheduler,
+  resolvePath,
   traceContextToLogContext,
 } from "./deps.js";
 import type {
@@ -43,7 +44,10 @@ import type {
   ExecutionPort,
   FileSystemPort,
   ImageProcessorPort,
+  LiveCapturePort,
   PdfDocumentPort,
+  VideoFramePort,
+  WorkspaceResourceIndexPort,
   McpConnectionSnapshot,
   SkillLoadOutcome,
   SkillPort,
@@ -89,6 +93,9 @@ import type {
   RuntimeBackgroundStopResult,
 } from "./methods/background.js";
 import { initializeRuntimeTooling } from "./helpers/runtime-tools.js";
+import { PdfPasswordCache } from "./helpers/pdf-password-cache.js";
+import { createPasswordAwarePdfDocumentPort } from "./helpers/pdf-password-port.js";
+import { requestPdfPasswordViaAskUserQuestion } from "./methods/pdf-password-prompt.js";
 import {
   resolveInitialDynamicWorkflowToolsActivated,
   type DynamicWorkflowActivationSource,
@@ -139,6 +146,7 @@ import { projectPersistentAgentMemoryTools } from "../subagent/persistent-memory
 import { RuntimeTelemetryFacade } from "../telemetry/runtime-telemetry.js";
 import type { WorkspaceHookRuntimeAdmissionPort } from "../hooks/workspace-hook-runtime-admission.js";
 import { disposeNodeReplSession } from "../tool/handlers/node-repl.js";
+import type { PdfReadProgressMap } from "../tool/types.js";
 import { cloneModelSelection } from "./model-selection.js";
 
 // oxlint-disable typescript-eslint/no-unsafe-declaration-merging
@@ -170,6 +178,8 @@ export class AgentRuntime {
   private sessionModelSelection: ModelSelection | undefined;
   private messageHistory: MessageHistory;
   private readFileState: ReadFileStateMap;
+  private pdfPasswordCache: PdfPasswordCache;
+  private pdfReadProgress: PdfReadProgressMap;
   private cachedTools: ModelToolContract[] | null = null;
   /** launch.md「On demand: activation」：onDemand 会话出生为 false，`activateDynamicWorkflowTools` 翻为 true。 */
   private dynamicWorkflowToolsActivated: boolean;
@@ -209,6 +219,9 @@ export class AgentRuntime {
   private fileSystemPort?: FileSystemPort;
   private imageProcessorPort?: ImageProcessorPort;
   private pdfDocumentPort?: PdfDocumentPort;
+  private workspaceResourceIndexPort?: WorkspaceResourceIndexPort;
+  private liveCapturePort?: LiveCapturePort;
+  private videoFramePort?: VideoFramePort;
   private skillLoadOutcome?: SkillLoadOutcome;
   private workingDirectory: string;
   private workspaceRoot: string;
@@ -312,6 +325,8 @@ export class AgentRuntime {
       config.modelSelection && cloneModelSelection(config.modelSelection);
     this.messageHistory = new MessageHistoryImpl();
     this.readFileState = new Map();
+    this.pdfPasswordCache = new PdfPasswordCache();
+    this.pdfReadProgress = new Map();
     this.memoryRecallState = createMemoryRecallState();
     this.runtimeCommandQueue = createRuntimeCommandQueue();
     this.workingDirectory = config.workingDirectory ?? ".";
@@ -324,7 +339,31 @@ export class AgentRuntime {
     this.executionPort = deps.executionPort;
     this.fileSystemPort = deps.fileSystemPort;
     this.imageProcessorPort = deps.imageProcessorPort;
-    this.pdfDocumentPort = deps.pdfDocumentPort;
+    // 密码统一通道：包装后的端口覆盖 Read / 附件解析 / 子 runtime；workflow-facade 与
+    // script-workflow-bridge 直接取 deps.pdfDocumentPort（后台无交互面，不弹窗）。
+    // 必须在 initializeRuntimeTooling 之前包装——executor 会冻结依赖（impl.ts）。
+    this.pdfDocumentPort = deps.pdfDocumentPort
+      ? createPasswordAwarePdfDocumentPort({
+          inner: deps.pdfDocumentPort,
+          cache: this.pdfPasswordCache,
+          // CLI --pdf-password：无头场景的非交互密码来源；子 runtime 经共享 deps 自然继承。
+          ...(deps.pdfPassword ? { staticPassword: deps.pdfPassword } : {}),
+          // 密码错误与未提供密码在下游同为 password_protected 降级；这里补一条可区分的
+          // warn 信号（绝不携带密码），批处理场景靠它发现“--pdf-password 给错了”。
+          onStaticPasswordRejected: (filePath) => {
+            this.logger?.warn("CLI-provided PDF password was rejected for this file", {
+              event: "pdf.password.cli_rejected",
+              filePath,
+            });
+          },
+          normalizeKey: (filePath) => resolvePath(this.workingDirectory, filePath),
+          requestPassword: (request, traceContext, abortSignal) =>
+            requestPdfPasswordViaAskUserQuestion.call(runtime, request, traceContext, abortSignal),
+        })
+      : undefined;
+    this.workspaceResourceIndexPort = deps.workspaceResourceIndexPort;
+    this.liveCapturePort = deps.liveCapturePort;
+    this.videoFramePort = deps.videoFramePort;
     this.subagentPort = deps.subagentPort ?? runtime.createDefaultSubagentPort(deps);
     this.dynamicWorkflowRunPort = deps.dynamicWorkflowRunPort;
     // GUI「配置」解析子代理模型用的目录（与工具上下文拿的是同一个端口）。
@@ -394,6 +433,7 @@ export interface AgentRuntime {
   getSessionModelSelection(): ModelSelection | undefined;
   setSessionModelSelection(selection: ModelSelection | undefined): void;
   getProjectId(): ProjectId;
+  getWorkspaceKey(): string;
   ensureSessionPersistedForExternalActivity(
     input: string,
     options?: { traceContext?: TraceContext },

@@ -6,18 +6,10 @@ import {
 } from "@zcode/adapters/storage";
 import { createNodeLoggerFactory } from "@zcode/adapters/logging";
 import { createConfig, resolvePath } from "@zcode/adapters/config";
-import {
-  createNodeExecutionAdapter,
-  resolveEffectiveBashShellSelection,
-} from "@zcode/adapters/exec";
-import { createNodeFileSystemAdapter } from "@zcode/adapters/fs";
-import { createNodeWebFetchHttpClientAdapter } from "@zcode/adapters/http";
-import { createJimpImageProcessorAdapter } from "@zcode/adapters/image";
-import { createPopplerPdfDocumentAdapter } from "@zcode/adapters/pdf";
-import { createNodeSessionMailboxAdapter } from "@zcode/adapters/mailbox";
+import { resolveEffectiveBashShellSelection } from "@zcode/adapters/exec";
 import { createNodeContextSourceAdapter } from "@zcode/adapters/context";
 import { createNodeSkillAdapter } from "@zcode/adapters/skills";
-import { createMcpAdapter } from "@zcode/adapters/mcp";
+import { wirePorts } from "./port-wiring.js";
 import {
   AgentRuntime,
   normalizeAgentProfiles,
@@ -54,7 +46,6 @@ import type {
 } from "./types.js";
 import {
   createConfigCliOverrides,
-  isMessageEnabled,
   resolveEffectiveLocale,
   resolveEffectiveConfigResult,
 } from "./app-config-options.js";
@@ -382,17 +373,6 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
         rootDir: join(storageRoot, "cli", "artifacts"),
         videoCacheRootDir: join(storageRoot, "cli", "video-cache"),
       });
-    const imageProcessorPort = options.imageProcessorPort ?? createJimpImageProcessorAdapter();
-    const messageEnabled = isMessageEnabled(options.env ?? process.env);
-    const sessionMailboxPort =
-      options.sessionMailboxPort ??
-      (messageEnabled
-        ? createNodeSessionMailboxAdapter({
-            rootDir: resolvePath(
-              (options.env ?? process.env).ZCODE_MAILBOX_ROOT ?? "~/.zcode/mailbox",
-            ),
-          })
-        : undefined);
     markStorageAdaptersInitialized({
       cliStorageRoot,
       hasInjectedArtifactStore: options.artifactStore !== undefined,
@@ -400,50 +380,29 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       startupTimer,
       storageRoot,
     });
-    const mcpPort =
-      options.mcpPort ??
-      (runtimeConfig.mcp?.enabled === false
-        ? undefined
-        : (options.mcpPortFactory?.({ workingDirectory }) ??
-          createMcpAdapter({
-            clientVersion: appVersion,
-            env: options.env,
-            logger,
-            network: {
-              httpProxy: configResult.config.network.httpProxy,
-              noProxy: configResult.config.network.noProxy,
-              caCertFile: configResult.config.network.caCertFile,
-            },
-            workingDirectory,
-          })));
-    const ownsMcpPort = options.mcpPort === undefined && mcpPort !== undefined;
-    const executionPort =
-      options.executionPort ??
-      createNodeExecutionAdapter({
-        onToolExecResource: options.onToolExecResource,
-        network: {
-          httpProxy: configResult.config.network.httpProxy,
-          noProxy: configResult.config.network.noProxy,
-          caCertFile: configResult.config.network.caCertFile,
-        },
-        outputRootDir: join(storageRoot, "cli", "exec"),
-        processEnv: options.env ?? process.env,
-      });
-    const ownsExecutionPort = options.executionPort === undefined;
-    const pdfDocumentPort =
-      options.pdfDocumentPort ?? createPopplerPdfDocumentAdapter({ executionPort });
-    // browser-use 控制端口：仅当宿主（desktop）注入时可用，无本地 fallback（纯 CLI 无浏览器底座）。
-    const fileSystemPort = options.fileSystemPort ?? createNodeFileSystemAdapter();
-    const httpClientPort =
-      options.httpClientPort ??
-      createNodeWebFetchHttpClientAdapter({
-        env: options.env ?? process.env,
-        timeoutMs: configResult.config.network.timeout,
-        proxyUrl: configResult.config.network.httpProxy,
-        noProxy: configResult.config.network.noProxy,
-        caCertFile: configResult.config.network.caCertFile,
-      });
-    const providerEndpointRoutingPort = options.providerEndpointRoutingPort;
+    const wiredPorts = wirePorts({
+      options,
+      configResult,
+      runtimeConfig,
+      workingDirectory,
+      storageRoot,
+      appVersion,
+      logger,
+      configuredMcpServers,
+    });
+    const {
+      imageProcessorPort,
+      pdfDocumentPort,
+      fileSystemPort,
+      httpClientPort,
+      executionPort,
+      sessionMailboxPort,
+      mcpPort,
+      providerEndpointRoutingPort,
+      ownsExecutionPort,
+      ownsMcpPort,
+      workspaceResourceIndexPort,
+    } = wiredPorts;
     markMcpAdapterInitialized({
       configuredMcpServers,
       hasInjectedMcpPort: options.mcpPort !== undefined,
@@ -839,6 +798,9 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       httpClientPort,
       imageProcessorPort,
       pdfDocumentPort,
+      // CLI --pdf-password：无头场景密码 PDF 的非交互解锁来源（message-attachments.md）。
+      pdfPassword: options.pdfPassword,
+      workspaceResourceIndexPort,
       artifactStore,
       contextSourcePort:
         options.contextSourcePort ?? createNodeContextSourceAdapter({ env: options.env }),

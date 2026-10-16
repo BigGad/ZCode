@@ -239,6 +239,8 @@ export const runPrompt = async (
     browserRuntime = createCliHeadlessBrowserRuntime(options, deps);
     app = await createApp({
       browserControlPort: browserRuntime?.browserControlPort,
+      // --pdf-password：无头下密码 PDF 的非交互解锁来源；仅无头链路设置（run.ts 校验作用域）。
+      ...(options.pdfPassword ? { pdfPassword: options.pdfPassword } : {}),
       env: appEnv,
       // headless 没有交互审批面，core 因此退到 deny broker，于是 CreateWorkflow 的
       // alwaysAsk gate 在 -p 下**必然被拒**（"No permission client configured"）。

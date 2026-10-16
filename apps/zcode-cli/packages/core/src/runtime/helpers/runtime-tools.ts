@@ -177,8 +177,9 @@ function createRuntimeToolExecutor(
     fileSystemPort: deps.fileSystemPort,
     httpClientPort: deps.httpClientPort,
     imageProcessorPort: deps.imageProcessorPort,
-    // 合并删除旧模型连接时曾漏掉此端口；Read 分页渲染与整份 PDF 页数检查仍依赖宿主注入。
-    pdfDocumentPort: deps.pdfDocumentPort,
+    // 必须取 runtime.pdfDocumentPort（构造器已包装密码统一通道装饰器）而非 deps：
+    // executor 在构造时冻结依赖，改用 deps 会绕过问询装饰器。
+    pdfDocumentPort: runtime.pdfDocumentPort,
     embeddedSearchBackend: runtime.config.embeddedSearchBackend,
     nativeSearchEnhancementsEnabled: runtime.config.nativeSearchEnhancementsEnabled,
     skillPort: deps.skillPort,
@@ -198,6 +199,7 @@ function createRuntimeToolExecutor(
     modelCatalogPort: deps.modelCatalogPort,
     runtimeTaskRegistry: runtime.runtimeTaskRegistry,
     readFileState: runtime.readFileState,
+    pdfReadProgress: runtime.pdfReadProgress,
     // 工作流创作工具的技能门（tool/handlers/workflow-skill-gate.ts）：按模型此刻看得见的历史回答
     // 「读过技能没有」。只在会话真有 Skill 工具时给探针——没有 skillPort 的会话装不上那个技能，
     // 门若仍然在场就成了一道谁也过不去的墙。

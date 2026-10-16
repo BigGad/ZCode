@@ -78,7 +78,10 @@ import type {
   FileSystemPort,
   HttpClientPort,
   ImageProcessorPort,
+  LiveCapturePort,
   PdfDocumentPort,
+  VideoFramePort,
+  WorkspaceResourceIndexPort,
   HooksRuntimeConfig,
   SkillPort,
   McpPort,
@@ -351,6 +354,13 @@ export interface AgentRuntimeDeps {
   httpClientPort?: HttpClientPort;
   imageProcessorPort?: ImageProcessorPort;
   pdfDocumentPort?: PdfDocumentPort;
+  /** CLI 无头注入的全局 PDF 密码（--pdf-password）；仅密码装饰器消费，不落盘不进日志。 */
+  pdfPassword?: string;
+  workspaceResourceIndexPort?: WorkspaceResourceIndexPort;
+  /** 网络流（RTSP 等）live capture 端口；CLI stream 监控链路消费。 */
+  liveCapturePort?: LiveCapturePort;
+  /** 视频抽帧端口；stream-monitor segment 分析与后续 video-frames 主线消费。 */
+  videoFramePort?: VideoFramePort;
   skillPort?: SkillPort;
   mcpPort?: McpPort;
   subagentPort?: SubagentPort;
@@ -787,8 +797,13 @@ export const INLINE_MEDIA_ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024;
 
 export const MAX_IMAGE_ATTACHMENT_DIMENSION = 2000;
 
+/** 密码 PDF 附件占位符 errorCode；解锁流程据此识别需征求密码的附件。 */
+export const PDF_PASSWORD_PROTECTED_ATTACHMENT_ERROR_CODE = "pdf_password_protected";
+
 export interface ResolvedTurnAttachment {
   contentBlock: ModelMessageContentBlock;
+  /** PDF 页图等多块形态；存在时下游优先消费该数组（contentBlock 保持单块回退语义）。 */
+  contentBlocks?: ModelMessageContentBlock[];
   filename?: string;
   metadata: AttachmentStorageMetadata;
   mime: string;

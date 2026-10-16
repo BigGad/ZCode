@@ -19,6 +19,7 @@ import type {
   HookRunner,
   ImageProcessorPort,
   PdfDocumentPort,
+  WorkspaceResourceIndexPort,
   McpConnectionSnapshot,
   SkillLoadOutcome,
   SkillPort,
@@ -60,6 +61,8 @@ import type { ProjectMemoryExtractionScheduler } from "./helpers/project-memory-
 import type { ProjectMemoryUpdate } from "./helpers/project-memory-dream.js";
 import type { RuntimeTelemetryFacade } from "../telemetry/runtime-telemetry.js";
 import type { WorkspaceHookRuntimeAdmissionPort } from "../hooks/workspace-hook-runtime-admission.js";
+import type { PdfReadProgressMap } from "../tool/types.js";
+import type { PdfPasswordCache } from "./helpers/pdf-password-cache.js";
 
 export interface AgentRuntimeInternal
   extends AgentRuntimeCoreMethods, AgentRuntimeTurnMethods, AgentRuntimeHookMethods {
@@ -131,6 +134,11 @@ export interface AgentRuntimeInternal
   fileSystemPort?: FileSystemPort;
   imageProcessorPort?: ImageProcessorPort;
   pdfDocumentPort?: PdfDocumentPort;
+  /** PDF 解锁密码内存缓存（密码统一通道唯一所有者，生命周期 = runtime，从不落盘）。 */
+  pdfPasswordCache: PdfPasswordCache;
+  /** PDF 分页阅读进度（read-pdf.ts 唯一写入者，跨 Read 调用累计）。 */
+  pdfReadProgress: PdfReadProgressMap;
+  workspaceResourceIndexPort?: WorkspaceResourceIndexPort;
   skillLoadOutcome?: SkillLoadOutcome;
   workingDirectory: string;
   workspaceRoot: string;

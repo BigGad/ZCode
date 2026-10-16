@@ -8,7 +8,7 @@ import {
 } from "./config.js";
 import { getMode, getPlanEnabled } from "./config.js";
 import { getSessionModelSelection, setSessionModelSelection } from "./config.js";
-import { getProjectId } from "./config.js";
+import { getProjectId, getWorkspaceKey } from "./config.js";
 import { setWorkingDirectory } from "./config.js";
 import { ensureSessionPersistedForExternalActivity } from "./config.js";
 import { getActiveTurnInfo } from "./config.js";
@@ -210,6 +210,7 @@ export function installAgentRuntimeMethods(ctor: AgentRuntimeConstructor): void 
   proto.getSessionModelSelection = getSessionModelSelection;
   proto.setSessionModelSelection = setSessionModelSelection;
   proto.getProjectId = getProjectId;
+  proto.getWorkspaceKey = getWorkspaceKey;
   proto.setWorkingDirectory = setWorkingDirectory;
   proto.ensureSessionPersistedForExternalActivity = ensureSessionPersistedForExternalActivity;
   proto.maybeStartSessionTitleGenerationFromExternalInput =

@@ -62,6 +62,8 @@ export type ToolTranscriptPart = {
   detailLines: string[];
   error?: string;
   output?: string;
+  /** 运行中进度文案（ToolCallProgress.message，如 Read PDF 的「已识别 20/42 页」）；终态必须清除。 */
+  progressMessage?: string;
   resultDisplay?: ToolResultDisplay;
   status: "pending" | "running" | "completed" | "failed";
   title?: string;

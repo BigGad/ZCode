@@ -561,18 +561,22 @@ function subagentStatusFromToolPart(
  */
 function attachmentMetasOfMessage(
   parts: readonly MessagePart[],
-): Array<{ fileName: string; mime: string; bytes: number; ref?: string }> {
+): Array<{ fileName: string; mime: string; bytes: number; ref?: string; pageCount?: number }> {
   const fileParts = parts.filter(
     (part): part is Extract<MessagePart, { type: "file" }> => part.type === "file",
   );
   return fileParts.map((part, index) => {
     const urlIsStableRef = part.url.length > 0 && !part.url.startsWith("data:");
     const basenameFromUrl = urlIsStableRef ? (part.url.split(/[\\/]/).pop() ?? "") : "";
+    // 冷恢复：页数徽标从已持久化的 resolve metadata（part.metadata.pdf.pageCount）还原，
+    // 与 live 的 TurnAttachmentMetaUpdated 补发链路收敛到同一 userInput row 字段。
+    const pdfPageCount = part.metadata?.pdf?.pageCount;
     return {
       fileName: part.filename ?? (basenameFromUrl || `attachment-${index + 1}`),
       mime: part.mime,
       bytes: part.metadata?.sizeBytes ?? 0,
       ...(urlIsStableRef ? { ref: part.url } : {}),
+      ...(typeof pdfPageCount === "number" && pdfPageCount > 0 ? { pageCount: pdfPageCount } : {}),
     };
   });
 }

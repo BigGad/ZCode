@@ -183,6 +183,8 @@ export interface ZCodeAppOptions {
   httpClientPort?: HttpClientPort;
   imageProcessorPort?: ImageProcessorPort;
   pdfDocumentPort?: PdfDocumentPort;
+  /** CLI 无头注入的全局 PDF 密码（--pdf-password）；透传 AgentRuntimeDeps.pdfPassword。 */
+  pdfPassword?: string;
   artifactStore?: ToolArtifactStorePort;
   contextSourcePort?: ContextSourcePort;
   /** 仅协议宿主注入；普通 CLI 不加载内置 visualize 技能。 */

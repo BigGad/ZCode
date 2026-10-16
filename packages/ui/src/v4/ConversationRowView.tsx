@@ -754,6 +754,12 @@ const UserInputAttachmentList = memo(function UserInputAttachmentList({
     const isUnavailable = failedRefs.has(ref);
     const thumbnailUrl = thumbnailUrls.get(ref) ?? "";
     const previewItemIndex = previewEntries.findIndex((entry) => entry.index === index);
+    // PDF 页数徽标：live 由 TurnAttachmentMetaUpdated 补发、冷恢复从持久 metadata 合成，
+    // 两链路都收敛到 AttachmentRef.pageCount；无页数（如 >20MiB 路径引用）不展示。
+    const pdfPageCountLabel =
+      isPdf && typeof attachment.pageCount === "number" && attachment.pageCount > 0
+        ? intl.formatMessage({ id: "chat.attachments.pdfPageCount" }, { count: attachment.pageCount })
+        : null;
     // 图片与视频共用当前消息的媒体 gallery；video 首次成为 active item 时再读取。
     const canOpen =
       (isTextMaterial && Boolean(sessionId && readAttachment)) ||
@@ -839,7 +845,9 @@ const UserInputAttachmentList = memo(function UserInputAttachmentList({
                 {attachment.fileName}
               </span>
               <span className="block truncate text-ui-sm font-normal text-foreground-subtle">
-                {getAttachmentTypeLabel(attachment.fileName, attachment.mime)}
+                {pdfPageCountLabel
+                  ? `${getAttachmentTypeLabel(attachment.fileName, attachment.mime)} · ${pdfPageCountLabel}`
+                  : getAttachmentTypeLabel(attachment.fileName, attachment.mime)}
               </span>
             </div>
           </>
@@ -851,14 +859,21 @@ const UserInputAttachmentList = memo(function UserInputAttachmentList({
             )}
           </span>
         ) : (
-          <FileDisplayInline
-            path={attachment.fileName}
-            options={{
-              className: "inline-flex min-w-0 max-w-40 items-center gap-1.5",
-              iconSize: 16,
-              fileNameClassName: "truncate text-ui-base font-medium text-foreground",
-            }}
-          />
+          <>
+            <FileDisplayInline
+              path={attachment.fileName}
+              options={{
+                className: "inline-flex min-w-0 max-w-40 items-center gap-1.5",
+                iconSize: 16,
+                fileNameClassName: "truncate text-ui-base font-medium text-foreground",
+              }}
+            />
+            {pdfPageCountLabel ? (
+              <span className="shrink-0 text-ui-sm font-normal text-foreground-subtle">
+                {pdfPageCountLabel}
+              </span>
+            ) : null}
+          </>
         )}
         {onRemove && isEditingAttachment ? (
           <AttachmentRemove

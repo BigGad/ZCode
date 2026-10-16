@@ -37,6 +37,8 @@ export type GlobalOptions = {
   memoryBench?: boolean;
   noColor: boolean;
   outputFormat?: GlobalOutputFormat;
+  /** 全局 PDF 密码（--pdf-password）：无头运行所有密码 PDF 共用；undefined = 未提供。 */
+  pdfPassword?: string;
   verbose: boolean;
 };
 

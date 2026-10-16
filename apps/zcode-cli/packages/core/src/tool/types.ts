@@ -184,6 +184,7 @@ export interface ToolExecutionContext {
   modelCatalogPort?: ModelCatalogPort;
   runtimeTaskRegistry?: RuntimeTaskRegistry;
   readFileState?: ReadFileStateMap;
+  pdfReadProgress?: PdfReadProgressMap;
   recordReadFileStateMetadata?: (metadata: PersistedReadFileStateMetadata) => void;
   /** 记录 Skill resolved metadata；仅用于 telemetry，不改变模型可见结果。 */
   recordSkillTelemetryMetadata?: (metadata: SkillTelemetryMetadata) => void;
@@ -228,6 +229,14 @@ export interface ReadFileStateEntry {
 }
 
 export type ReadFileStateMap = Map<string, ReadFileStateEntry>;
+
+/** PDF 分页阅读进度条目：runtime 持有 Map，read-pdf.ts 唯一写入者，跨 Read 调用累计。 */
+export interface PdfReadProgressEntry {
+  pageCount?: number;
+  recognizedPages: Set<number>;
+}
+
+export type PdfReadProgressMap = Map<string, PdfReadProgressEntry>;
 
 // -----------------------------------------------
 // Tool Handler
