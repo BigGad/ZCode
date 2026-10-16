@@ -1620,3 +1620,40 @@ interrupted result。修复不改变工具 schema、权限、执行时机、协�
 
 身份定位补充：conversation-quotes 将原始有序 text/mention 节点逐条映射到模型专用
 材料，保留同名手打文字与原生提及的区别，不改持久化正文或发送 ref 的授权边界。
+
+### 2026-10-16 PDF 页图渲染与密码解锁
+
+`PdfDocumentPort` 请求新增可选 `password`（仅内存传递），adapter 对 pdfinfo/pdftoppm
+构造 `-upw`，失败重试 `-opw`；`getPageCount` 对 exit≠0 且 stderr 匹配 password 的场景
+由返回 undefined 改为抛 `password_protected` —— Read 原生路径（≤10 页直传 file block）
+由此从「加密字节直传 provider」变为快速失败 `PDF_PASSWORD_PROTECTED`，handler 经既有
+`READ_ERROR_CODE_BY_PDF_DOCUMENT_ERROR` 映射零改动。附件路径新增页图渲染分发（视觉模型
+≤20 页 + 尾注）与密码征求（`ASK_USER_QUESTION_TOOL_NAME` 通道，单次重试，手动最小化
+`PermissionResolved`，密码不进事件/元数据/日志）。工具 schema、description、权限规则与
+链路第 5/6 步（调度、UI 投递）不受影响；详见 `message-attachments.md` 同日章节。
+
+### 2026-10-16 PDF 密码统一通道与 Read 阅读进度
+
+取代上一条中的附件侧一次性密码征求：`AgentRuntime` 构造器内以
+`createPasswordAwarePdfDocumentPort` 包装 `PdfDocumentPort`（覆盖 Read、两条附件链路与子
+runtime；workflow-facade / script-workflow-bridge 故意持原始 port，后台不弹窗）。装饰器
+在 `password_protected` 且请求未带密码时：缓存密码先试（失败清缓存）→ 经
+`ASK_USER_QUESTION_TOOL_NAME` 问一次（同文件并发去重）→ 带密码重试一次 → 成功缓存、
+失败不缓存；Skip/拒绝原样抛错。安全不变量延续：`PermissionRequested` input `{}`、
+手动最小化 `PermissionResolved`、密码不进事件/元数据/日志。
+
+- Read 工具 schema、description、权限规则不变；行为变更仅发生在 port 级（问询）。
+- `runtime-tools.ts` executor 依赖改读 `runtime.pdfDocumentPort`（包装后），并共享
+  `pdfReadProgress`（runtime 持有，read-pdf.ts 唯一写入者）。
+- 新事件：`ToolCallProgress`（transient，不持久化）由 Read `pages` 分支发射两段——
+  开始 `{total, message:"第 X-Y 页 / 共 N 页"}`、页图就绪
+  `{total, progress, message:"已识别 R/N 页 · 第 X-Y 页完成"}`；探测失败降级省略 total。
+- UI：`ToolCallProgress` 投影已通用（Bash 特判不影响 Read），explore 工具组内
+  `ToolCallProgressIndicator` 渲染进度行，终态清除；附件徽标链见
+  `message-attachments.md` 同日章节。
+- TUI（同日补充）：`packages/tui` 的 `applyToolTranscriptEvent` 在
+  `ToolCallStarted`/`ToolCallProgress` 携带 `message` 时存入
+  `ToolTranscriptPart.progressMessage`（无 message 的进度事件保留旧文案），
+  `ToolCallResult`/`ToolCallError` 终态清除；`ToolTranscriptPartView` 仅在
+  `running` 状态渲染该行（accent 色、按终端宽度截断）。TUI 不渲染 `total`
+  独立字段，进度事实以 `message` 文本为准，与桌面端共用同一事件源。

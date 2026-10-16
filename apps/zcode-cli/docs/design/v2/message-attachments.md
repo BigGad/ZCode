@@ -438,7 +438,7 @@ type ModelMessageContent = string | MessageContentBlock[];
 - 图片默认走 `ImageProcessorPort.resizeToFit`，进入模型前最长边应限制在 2000 像素以内；后续支持 original detail 时必须由模型能力门控。Node/SEA 默认实现使用纯 JS Jimp adapter，以避免图片处理依赖平台原生二进制。
 - WebP 第一阶段不做 resize/transcode。Jimp 默认不支持 WebP 编码输出，adapter 必须原样返回 WebP bytes，`resized: false`，保留 `image/webp` MIME；如果后续引入 WebP resize，必须先在本 spec 中定义新的 WASM/native 资源加载、SEA 打包和降级行为。
 - SVG 不作为图片 base64 发送，优先按文本文件处理。
-- PDF 第一阶段可作为 media file block 或 fallback；不支持 PDF 的模型必须收到明确错误文本。
+- PDF 第一阶段可作为 media file block 或 fallback；不支持 PDF 的模型必须收到明确错误文本。有视觉能力的模型（`supportsImage`）优先走页图渲染（见「PDF 页图渲染与密码解锁（2026-10-16）」）。
 - 文本文件按统一预算读取，超限时返回 preview + artifact ref。
 - 对 data URL 校验 base64 非空、MIME 合法；空或损坏图片转稳定错误，不把坏 payload 发给 provider。
 - MIME 优先由内容 sniff，文件扩展名只作为 fallback。
@@ -655,6 +655,38 @@ npm test
 - ZCode app-server unsupported content block 返回稳定 invalid params。
 - 日志和 event 不泄露 base64 或完整文件内容。
 
+## 多模态扩展（2026-10-15）
+
+本文作为 image / PDF / 视频附件主线的事实源保持不变。下列分 spec 在本文之上搭建
+"多模态能力平台"，不破坏本文已落地的形态：
+
+- [`multimodal-platform.md`](./multimodal-platform.md)：六层架构（adapter / port /
+  resource index / resolver / bundle / client variant）总览；客户端变体装配策略；与
+  本文 attachment pipeline 的关系。
+- [`workspace-resource-index.md`](./workspace-resource-index.md)：workspace 维度跨
+  session 持久资源库；`resource://<workspaceIdentity>/<id>/<variant>` 形态；fork /
+  rewind reference 计数驱动 GC；`.zcode/resource-policy.yaml` 业务策略。
+- [`audio-input.md`](./audio-input.md)：audio 附件端到端通路；`AudioPort` /
+  `AudioTranscriptionPort` / `ModelAudioContentBlock`；`audio-transcription-worker`
+  后台转写；provider 投影支持/不支持 audio 双分支降级。
+- [`video-frames.md`](./video-frames.md)：video 抽帧采样；`VideoFramePort`；
+  `video-frame-worker` 按 policy 抽帧；不支持 video 的模型自动用 frame image blocks
+  替换。
+- [`audio-output.md`](./audio-output.md)：speech synthesis 生产端；`AudioOutputPort`；
+  `AudioOutput` tool；生成的 audio 作为 `sourceOrigin: "generated_output"` 写入资源
+  库并提供 inline 播放。
+- [`stream-input.md`](./stream-input.md)：live capture 通路（麦克 / 摄像头 / 屏幕 /
+  系统音频）；`LiveCapturePort`；`StreamSession` lifecycle；chunked upload 到
+  artifact store。
+- [`hardware-sensor.md`](./hardware-sensor.md)：GPS / 加速度 / 电池 / 网络等结构化
+  硬件传感器；`HardwareSensorPort`；JSON samples 作为 `kind: "hardware"` entry 持久
+  化。
+
+本次新增的契约都遵循本文既有原则：external I/O 收敛到 port；session 内事务与 workspace
+持久化是相互补充关系；media budget（40 MiB）共用；tool 变更走
+`docs/design/v2/tool/00-tool-change-chain.md` 端到端链路检查。后续以分 spec 单独提交
+为准；本文不重复展开。
+
 ## Composer PDF 对齐（2026-08-29）
 
 Composer PDF 使用独立的 `TurnAttachment.type = "pdf"` 和 shared
@@ -667,3 +699,143 @@ Composer PDF 使用独立的 `TurnAttachment.type = "pdf"` 和 shared
 omit PDF data 并保留 `[PDF: source: <path>]`，切回支持模型时从同一 artifact 恢复。Composer 和
 已发送 row 维持文档卡片形态，但统一使用 PdfViewer 与精确 row/part 授权的 attachment range
 read；relay/main 不保存 PDF bytes 或 session 业务状态。
+
+## PDF 页图渲染与密码解锁（2026-10-16）
+
+### 动机
+
+文本抽取（poppler pdftotext）和模型侧原生 PDF 解析都会折损水印、排版、图表信息。
+对高保真总结诉求，页图渲染（pdftoppm 100dpi JPEG → vision）是保真路径；该路径
+read 工具已具备（`pages` 参数），本节把同一能力接入附件解析。
+
+### 分发矩阵
+
+附件解析（local 与 inline 一致）对 PDF 按以下顺序分发：
+
+| 条件 | 投递形态 |
+| --- | --- |
+| `modelInputFormat.supportsImage === true` 且 `PdfDocumentPort`、`ImageProcessorPort` 可用 | 页图 image blocks（≤20 页 + 尾注 text block），原始 file block 不投递 |
+| 否则 `supportsPdf === true` | 现状单 file block（media file block + dataUrl） |
+| 否则 | 现状 omit + 文本占位（`[PDF: source: <path>]`） |
+
+渲染门槛取 `supportsImage`（页图本质是 image blocks；`supportsPdf=false` 但有视觉的模型
+同样受益），不要求 `supportsPdf`。渲染失败（port `unavailable`/`io_error`、无渲染路径）
+一律记 debug 后回退 file block，不得以错误终止 turn。
+
+### 预算
+
+- 每附件页图子预算 `PDF_ATTACHMENT_PAGE_IMAGES_BUDGET_BYTES = 12 MiB`（请求 media budget
+  40 MiB 的子预算）；超预算即止，已渲染页有效。
+- 页数上限 `PDF_ATTACHMENT_MAX_RENDERED_PAGES = 20`（与 read 工具
+  `READ_PDF_MAX_PAGES_PER_REQUEST` 同值）。
+- 每页仍走 `ImageProcessorPort.prepareForModel`（READ_IMAGE_* 约束），与 read 工具一致。
+- 多个 PDF 附件各自封顶 12MiB，跨附件共享累加器为开放问题（protected latest-user-message
+  硬错误发生在 40MiB 处，单附件封顶不足以保证多附件场景不触发）。
+
+### 尾注与 agentic continuation
+
+超 20 页或超预算时投递已渲染页 + 尾注 text block，内容含总页数、已投页数、源路径，
+引导 agent 用现有 read 工具 `pages` 参数继续读。不做 resolver 内多请求 map-reduce。
+
+### 元数据与持久化
+
+- `ResolvedTurnAttachment` 新增可选 `contentBlocks`（多块形态），存在时优先于单 `contentBlock`；
+  `media-observability` 汇总按块累计字节。
+- `AttachmentStorageMetadata` 新增可选 `pdf: { pageCount?, renderedPageCount?,
+  renderStrategy?: "page_images" }`，用于可观测性与下游判别（如 `conversation.ts` 的
+  pasted-inline-image 分支不得误判页图块）。
+- 页图作为 inline image 随用户消息持久化，模型切换 / 冷恢复语义与现有图片一致；
+  尾注中的源路径保证 `Read` + `pages` 续读可用。
+
+### 密码 PDF
+
+- `PdfDocumentPort` 请求新增可选 `password`（仅内存传递，禁止写入事件、元数据、日志或任何
+  持久化边界）；adapter 对 pdfinfo/pdftoppm 构造 `-upw`，失败重试 `-opw`（单字段双变体）。
+- `getPageCount` 对 exit≠0 且 stderr 匹配 `/password/i` 抛 `password_protected`
+  （exit=0 不抛，避免误伤 owner-password-only 可渲染 PDF）。原 Read 原生路径会把加密字节
+  直传 provider，该分类使其快速失败为 `PDF_PASSWORD_PROTECTED`。
+- 附件路径：解析产出的占位符带 `pdf_password_protected` errorCode；runtime 在有
+  interaction broker 时经 `ASK_USER_QUESTION_TOOL_NAME` 通道征求密码，用户提交后仅对失败
+  附件子集带密码重跑解析一次（不循环）。
+- 密码防泄漏关键边界：**不得**调用 `resolvePermission`（会把 `modifiedInput` 写入
+  `PermissionResolved` 事件，密码落盘）；解锁流程结束手动发最小化 `PermissionResolved`
+  （仅 toolCallId + decision）。`PermissionRequested` 事件 input 为 `{}`，不含密码。
+- argv 密码经 `ps` 对本机其他进程可见（poppler 无 stdin/env 通道）；本地单用户场景接受。
+- UI 密码输入暂不遮罩（elicitation `sensitive` 字段尚未被对话框消费），为后续项。
+
+## PDF 密码统一通道与阅读进度（2026-10-16，第二阶段）
+
+本节取代上一节「密码 PDF」中的一次性解锁 pass 描述：附件解析里的独立解锁重跑
+（`resolveTurnAttachmentsWithPdfUnlock`）删除，密码征求下沉到 `PdfDocumentPort` 装饰器，
+附件链路与 Read 工具链路共享同一份密码状态与交互。
+
+### 动机
+
+超过 `PDF_INPUT_MAX_BYTES`（20 MiB）的密码 PDF 附件只投递路径引用，必须经 Read 工具
+`pages` 分页续读；一次性解锁 pass 只覆盖附件解析，Read 链路遇到 `password_protected`
+快速失败后模型无法提供密码，链路卡死。真实阅卷场景（44MB 密码扫描卷宗）验证了该缺口。
+
+### 所有权（唯一所有者）
+
+| 状态 | 所有者 | 说明 |
+| --- | --- | --- |
+| PDF 密码（内存） | `AgentRuntimeInternal.pdfPasswordCache`（构造时创建，按引用共享给装饰器） | 纯 Map 不序列化；key = 规范化绝对路径；生命周期 = runtime 生命周期。重启后必须重新询问 |
+| 密码问询交互 | `requestPdfPasswordViaAskUserQuestion`（共享 helper，原一次性 pass 的问询逻辑搬移） | 附件与 Read 两条链路的唯一问询写入者；安全不变量原样保留（`PermissionRequested` input `{}`；手动最小化 `PermissionResolved`，绝不走 `resolvePermission`） |
+| 包装点 | `AgentRuntime` 构造器内 `createPasswordAwarePdfDocumentPort` | 覆盖 Read（executor 依赖改读 `runtime.pdfDocumentPort`）、两条附件链路与子 runtime。workflow-facade / script-workflow-bridge **故意**持有原始 port：后台上下文无交互面，密码 PDF 直接 `password_protected` 失败，属设计行为 |
+| 累计识别进度 | `AgentRuntimeInternal.pdfReadProgress: Map<absPath, { pageCount?, recognizedPages: Set<number> }>`，唯一写入者 read-pdf.ts | 仿 `readFileState` 按引用共享进 executor → `ToolExecutionContext` |
+
+### 解锁语义
+
+`getPageCount`/`renderPages` 抛 `password_protected` 且请求未带密码时：
+缓存密码先试（失败即清除缓存，文件可能已换）→ CLI 注入密码（`--pdf-password`，见下节；
+成功按同一规则入缓存，失败静默落空不拦截）→ 经 AskUserQuestion 问一次（同文件并发去重，
+共享同一次应答）→ 带密码重试一次 → 成功缓存、失败不缓存（错误密码永不入缓存）；
+Skip / broker 拒绝 / deny broker → 原样抛错，附件侧照旧产出密码占位符，Read 侧照旧
+`PDF_PASSWORD_PROTECTED`。请求已带密码 → 直通不问询。N 个密码文件 = N 次弹窗
+（取代旧的合并问询），每次弹窗点名具体文件。
+
+### 无头 CLI 密码注入（--pdf-password，2026-10-16）
+
+无头场景（`-p/--prompt`、`--target`）没有 AskUserQuestion 交互面，密码 PDF 在无头下必然
+`password_protected` 失败；阅卷等批量任务需要一个非交互的密码来源。
+
+- 参数：`--pdf-password <pw>`，单值全局，适用于本次运行所有密码 PDF。空值（含纯空白）在
+  CLI 入口拒绝。作用域与无头链路对齐：仅 `--prompt` 与 `--target` 接受，其他子命令报错退出。
+- 传递链路（一条管道，不新增状态所有者）：`arguments.ts` → `GlobalOptions` →
+  `prompt-command` → `ZCodeAppOptions.pdfPassword` → `AgentRuntimeDeps.pdfPassword` →
+  `createPasswordAwarePdfDocumentPort` 的 `staticPassword`。workflow-facade /
+  script-workflow-bridge 仍故意持原始 port，不受影响；子 runtime 经共享 deps 自然继承。
+- 优先级：请求自带密码 > 缓存 > CLI 注入密码 > AskUserQuestion 问询。CLI 密码只在
+  `password_protected` 后于 `cache.runExclusive` 内尝试（同文件并发去重沿用同一把锁），
+  成功走既有「重试一次 → 入缓存」路径；错误密码不入缓存、不阻断后续问询。无头下问询被
+  deny broker 拒绝，原样抛 `password_protected`，不等待输入、不卡死。
+- 不新增环境变量（遵循 `ZCODE_` 环境变量约束，能用 CLI 参数表达的不做 env）。argv 密码经
+  `ps` 对本机其他进程可见，本地单用户场景接受（与 poppler argv 同一约定）；密码不落盘、
+  不进日志。
+- 失败反馈矩阵（文件不打开、turn 不中断、不卡死等待输入）：
+  - 未提供密码（无头）或用户 Skip：附件链路产出占位符
+    `[Attached application/pdf: 路径]` + `metadata.errorCode = pdf_password_protected`
+    （`recoverability: metadata_only`）；Read 链路快速失败稳定错误码
+    `PDF_PASSWORD_PROTECTED`。模型据此在回答中说明该文件无法读取。
+  - CLI 密码错误：与未提供密码走同一条降级路径，但 `onStaticPasswordRejected` 回调发出
+    `pdf.password.cli_rejected` warn 日志（只带文件路径，绝不携带密码），调用方据此区分
+    「密码给错」与「未提供密码」；错误密码不入缓存，同文件后续请求每次重试静态密码。
+
+### Read 阅读进度
+
+- read-pdf.ts（`pages` 分支）渲染前探测总页数（探测失败/不可用则省略 total 降级），
+  经 `ToolCallProgress` 事件（transient，不持久化）发射两段：
+  开始 `{ total, message: "第 X-Y 页 / 共 N 页" }`；页图准备完成后
+  `{ total, progress: 已识别累计, message: "已识别 R/N 页 · 第 X-Y 页完成" }`。
+- 已识别累计跨 Read 调用累加（同一文件多次 `pages` 读取），由 `pdfReadProgress` 持有；
+  UI 只做展示投影，不持有业务状态。
+- UI：explore 工具组内现 `ToolCallProgressIndicator` 进度行；终态（result/error）清除。
+
+### 附件页数徽标
+
+- `TurnAttachmentMeta` 新增可选 `pageCount`（仅展示元信息，非敏感）；仅内联 ≤20MiB
+  附件在 resolve 时已知。新增 transient 之外的 `TurnAttachmentMetaUpdated` 会话事件
+  （仅当 ≥1 个附件有 pageCount 时发射，index 对齐 TurnStarted 附件顺序），
+  V4 投影 patch userInput 行附件；冷恢复从已持久化的 `part.metadata.pdf.pageCount` 读取。
+- >20MiB 路径引用附件的徽标为后续项（需路径→附件 ref 注册表）；进度行已显示共 N 页。
+- 密码输入遮罩（elicitation `sensitive` 全链透传）为可选后续项，本期未实现。

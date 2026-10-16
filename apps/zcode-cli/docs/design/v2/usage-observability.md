@@ -97,6 +97,29 @@ All writes must use trace/session/turn identifiers already present in the runtim
 Statistics rows must not store full prompts, full tool input/output, secrets, tokens, cookies, or
 private file contents.
 
+## CLI Export (`zcode usage`, 2026-10-16)
+
+Read-only export channel for statistics and later LLM analysis. Backed by the additive
+`UsageQueryPort` (`queryModelUsageRecords` / `queryToolUsageRecords`) implemented by
+`SqliteSessionStore`; `UsageStorePort` (write side) is unchanged so existing fakes stay valid.
+
+- `zcode usage` — human-readable summary of the last 7 days: totals, per model, per
+  agent/querySource (with distinct session counts), per tool (`--tools`), and per session.
+- `--json` — NDJSON stream: one `meta` line (window, `truncated` flag) then
+  `model_request` rows and (with `--tools`) `tool_call` rows. Query rows never include
+  `raw_usage` / `provider_metadata` (debug-only payloads).
+- `--since` / `--until` — `Nd` (days back), unix ms, or ISO date; default window is 7 days.
+- `--agent`, `--session`, `--limit` (default 10 000, the adapters-side export cap) filter rows.
+- `--sessions` — list sessions in the window (id, parentID, title, updated time) so subagent
+  sessions can be picked for transcript export.
+- `--session <id> --json` — export that session's transcript as NDJSON
+  (`session_meta` + one `message` line per message with full parts). This is where
+  "每个 agent 调用的输入与输出" lives: statistics rows intentionally stay content-free,
+  subagent calls have their own sessionID (visible as `querySource: "subagent"` rows in
+  `--json`), and transcripts are fetched via `SessionStorePort.messages`.
+- Retention still applies: rows older than 30 days are pruned, so exports cannot cover
+  anything older.
+
 ## `/usage` Query Shape
 
 Daily model usage:
