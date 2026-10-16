@@ -480,6 +480,11 @@ export interface AttachmentStorageMetadata {
     resized?: boolean;
     transformedSizeBytes?: number;
   };
+  pdf?: {
+    pageCount?: number;
+    renderedPageCount?: number;
+    renderStrategy?: "page_images";
+  };
   storageKind?: "inline" | "artifact" | "local_ref" | "remote_ref" | "metadata_only";
   artifactUri?: string;
   originalUrl?: string;
@@ -1080,6 +1085,105 @@ export interface UsageStorePort {
   pruneUsage(input?: { beforeTime?: number }): Promise<void>;
   queryAppUsage(input: AppUsageQueryInput): Promise<AppUsageQueryResult>;
   queryTaskUsage(input: TaskUsageQueryInput): Promise<TaskUsageQueryResult>;
+}
+
+/** 明细导出查询的过滤条件；全部可选，缺省 = 全时间窗。 */
+export interface UsageRecordsQueryInput {
+  /** 含下界（unix ms）。 */
+  since?: number;
+  /** 含上界（unix ms）。 */
+  until?: number;
+  sessionID?: SessionId;
+  agent?: string;
+  /** 上限行数；缺省由实现给出安全默认（防止一次性导出爆内存）。 */
+  limit?: number;
+}
+
+/**
+ * model_usage 明细行（每逻辑模型请求一行）。与 ModelUsageRecord 的差异：
+ * 不含 rawUsage / providerMetadata（体积大且属 debug 路径），时间戳为数值，
+ * 布尔标记还原为 boolean。
+ */
+export interface ModelUsageQueryRow {
+  id: string;
+  logicalRequestId: string;
+  attemptIndex: number;
+  sessionID: SessionId;
+  turnID?: TurnId;
+  traceID?: TraceId;
+  spanID?: string;
+  assistantMessageID?: MessageId;
+  parentUserMessageID?: MessageId;
+  querySource: string;
+  providerId: string;
+  modelId: string;
+  variant?: string;
+  agent?: string;
+  mode?: string;
+  taskType?: string;
+  status: UsageStatus;
+  startedAt: number;
+  firstTokenAt?: number;
+  completedAt?: number;
+  durationMs?: number;
+  timeToFirstTokenMs?: number;
+  finishReason?: string;
+  toolCallCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+  providerTotalTokens?: number;
+  computedTotalTokens: number;
+  retryCount: number;
+  retryable: boolean;
+  cancelledByUser: boolean;
+  contextExceeded: boolean;
+  errorType?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+/** tool_usage 明细行（每工具调用一行）。 */
+export interface ToolUsageQueryRow {
+  id: string;
+  sessionID: SessionId;
+  turnID?: TurnId;
+  traceID?: TraceId;
+  toolCallID: string;
+  toolName: string;
+  sideEffectScope?: string;
+  readOnly?: boolean;
+  destructive?: boolean;
+  approvalStatus?: string;
+  status: UsageStatus;
+  startedAt: number;
+  firstOutputAt?: number;
+  completedAt?: number;
+  durationMs?: number;
+  timeToFirstOutputMs?: number;
+  exitCode?: number;
+  outputBytes: number;
+  stdoutBytes: number;
+  stderrBytes: number;
+  truncated: boolean;
+  retryCount: number;
+  retryable: boolean;
+  cancelledByUser: boolean;
+  errorType?: string;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+/**
+ * 用量明细只读查询（统计/LLM 分析导出通道，`zcode usage` 消费）。
+ * 与 UsageStorePort 分离：写侧已有 fakes 不被迫实现查询；行内不含
+ * prompt / 工具输入输出全文（见 usage-observability.md 约束）。
+ */
+export interface UsageQueryPort {
+  queryModelUsageRecords(input: UsageRecordsQueryInput): Promise<ModelUsageQueryRow[]>;
+  queryToolUsageRecords(input: UsageRecordsQueryInput): Promise<ToolUsageQueryRow[]>;
 }
 
 export interface LocalSettingStorePort {

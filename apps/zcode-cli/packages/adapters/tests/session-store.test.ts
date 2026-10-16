@@ -2962,6 +2962,105 @@ describe("SQLite session store", () => {
       await rm(tempRoot, { force: true, recursive: true });
     }
   });
+
+  // `zcode usage` 导出通道（usage-observability.md「CLI Export」节）：
+  // 明细行按时间窗/会话/agent 过滤，不含 rawUsage/provider_metadata，布尔 0/1 还原。
+  it("exports model and tool usage records via the query ports", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "zcode-usage-records-"));
+    const dbPath = join(tempRoot, "session.sqlite");
+    const store = createSqliteSessionStore({ dbPath });
+    const sessionID = createSessionId("usage-records");
+    const otherSessionID = createSessionId("usage-records-other");
+    const now = Date.now();
+
+    try {
+      for (const id of [sessionID, otherSessionID]) {
+        await store.createSession({
+          id,
+          projectID: createProjectId("usage-records"),
+          slug: id,
+          directory: tempRoot,
+          title: id,
+          version: "0.1.0",
+        });
+      }
+
+      await store.recordModelUsage({
+        agent: "explore",
+        id: "usage_query_recent",
+        inputTokens: 100,
+        logicalRequestId: "logical-recent",
+        modelId: "model-a",
+        outputTokens: 10,
+        providerId: "provider-a",
+        querySource: "subagent",
+        rawUsage: { inputTokens: 100 },
+        retryable: true,
+        retryCount: 1,
+        sessionID,
+        startedAt: now,
+        status: "completed",
+        traceID: createTraceId(),
+      });
+      await store.recordModelUsage({
+        id: "usage_query_other_session",
+        logicalRequestId: "logical-other",
+        modelId: "model-b",
+        providerId: "provider-a",
+        querySource: "main_turn",
+        sessionID: otherSessionID,
+        startedAt: now + 1,
+        status: "error",
+        errorMessage: "boom",
+      });
+      await store.upsertToolUsage({
+        id: "usage_query_tool",
+        sessionID,
+        startedAt: now + 2,
+        status: "completed",
+        toolCallID: createToolCallId("query-tool"),
+        toolName: "Read",
+        truncated: true,
+      });
+
+      const all = await store.queryModelUsageRecords({});
+      expect(all.map((row) => row.id)).toEqual([
+        "usage_query_recent",
+        "usage_query_other_session",
+      ]);
+      const recent = all[0];
+      expect(recent).toMatchObject({
+        agent: "explore",
+        inputTokens: 100,
+        modelId: "model-a",
+        querySource: "subagent",
+        retryable: true,
+        sessionID,
+      });
+      expect(recent).not.toHaveProperty("rawUsage");
+      expect(all[1]).toMatchObject({ status: "error", errorMessage: "boom" });
+
+      expect(
+        (await store.queryModelUsageRecords({ sessionID })).map((row) => row.id),
+      ).toEqual(["usage_query_recent"]);
+      expect(
+        (await store.queryModelUsageRecords({ agent: "explore" })).map((row) => row.id),
+      ).toEqual(["usage_query_recent"]);
+      expect(
+        (await store.queryModelUsageRecords({ since: now + 1 })).map((row) => row.id),
+      ).toEqual(["usage_query_other_session"]);
+      expect(
+        (await store.queryModelUsageRecords({ limit: 1 })).map((row) => row.id),
+      ).toEqual(["usage_query_recent"]);
+
+      const toolRows = await store.queryToolUsageRecords({ sessionID });
+      expect(toolRows).toHaveLength(1);
+      expect(toolRows[0]).toMatchObject({ toolName: "Read", truncated: true, sessionID });
+    } finally {
+      store.close();
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
 });
 
 // 16-timeline-authority-plan P3：session_input 账本生命周期。

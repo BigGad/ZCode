@@ -57,6 +57,10 @@ import type {
   UpdateScriptWorkflowActivityInput,
   UpdateSessionInput,
   UpdateScriptWorkflowRunInput,
+  ModelUsageQueryRow,
+  ToolUsageQueryRow,
+  UsageQueryPort,
+  UsageRecordsQueryInput,
   UsageStorePort,
 } from "@zcode/contracts";
 // 端口留在领域包 @zcode/dynamic-workflow，这里只做类型引用：adapters 运行时不依赖它。
@@ -228,7 +232,8 @@ export class SqliteSessionStore
     InputHistoryStorePort,
     LocalSettingStorePort,
     ScriptWorkflowStorePort,
-    UsageStorePort
+    UsageStorePort,
+    UsageQueryPort
 {
   private readonly db: DatabaseSync;
   private readonly dbPath: string;
@@ -857,6 +862,14 @@ export class SqliteSessionStore
 
   async queryTaskUsage(input: TaskUsageQueryInput): Promise<TaskUsageQueryResult> {
     return usageRepository.queryTaskUsage(this.db, input);
+  }
+
+  async queryModelUsageRecords(input: UsageRecordsQueryInput): Promise<ModelUsageQueryRow[]> {
+    return usageRepository.queryModelUsageRecords(this.db, input);
+  }
+
+  async queryToolUsageRecords(input: UsageRecordsQueryInput): Promise<ToolUsageQueryRow[]> {
+    return usageRepository.queryToolUsageRecords(this.db, input);
   }
 
   async recordInputHistory(input: {

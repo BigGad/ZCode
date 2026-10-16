@@ -6,16 +6,21 @@ import type {
   AppUsageQueryInput,
   AppUsageQueryResult,
   AppUsageToolRow,
+  ModelUsageQueryRow,
   TaskUsageQueryInput,
   TaskUsageQueryResult,
-  ModelUsageRecord,
+  ToolUsageQueryRow,
   ToolUsageRecord,
   TurnUsageRecord,
+  ModelUsageRecord,
+  UsageRecordsQueryInput,
 } from "@zcode/contracts";
 import { encodeJson } from "../json.js";
 
 const USAGE_RETENTION_DAYS = 30;
 const USAGE_RETENTION_MS = USAGE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+/** 明细导出缺省行数上限：防止无界导出一次性拉爆内存；更大窗口请分段传 since/until。 */
+const USAGE_RECORDS_DEFAULT_LIMIT = 10_000;
 
 export async function recordModelUsage(db: DatabaseSync, input: ModelUsageRecord): Promise<void> {
   const computedTotalTokens =
@@ -728,8 +733,9 @@ function taskUsageInputBaselineSource(querySource: string): string | undefined {
   return undefined;
 }
 
-function integer(value: number | null | undefined): number {
+function integer(value: number | string | null | undefined): number {
   // providerTotalTokens 这类旧记录字段可能是 null；adapters 独立 tsc 需要先完成类型收窄。
+  // 明细导出的原始行是 sqlite 泛型读出的 string | number | null，这里统一收窄为非负整数。
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return 0;
   }
@@ -742,4 +748,163 @@ function boolean(value: boolean | undefined): number {
 
 function nullableBoolean(value: boolean | undefined): number | null {
   return value === undefined ? null : boolean(value);
+}
+
+function usageRecordsWhere(input: UsageRecordsQueryInput): {
+  whereSql: string;
+  args: SQLInputValue[];
+} {
+  const clauses: string[] = [];
+  const args: SQLInputValue[] = [];
+  if (typeof input.since === "number") {
+    clauses.push("started_at >= ?");
+    args.push(input.since);
+  }
+  if (typeof input.until === "number") {
+    clauses.push("started_at <= ?");
+    args.push(input.until);
+  }
+  if (input.sessionID !== undefined) {
+    clauses.push("session_id = ?");
+    args.push(input.sessionID);
+  }
+  if (input.agent !== undefined) {
+    clauses.push("agent = ?");
+    args.push(input.agent);
+  }
+  return { whereSql: clauses.length > 0 ? `where ${clauses.join(" and ")}` : "", args };
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" ? value : undefined;
+}
+
+function flag(value: unknown): boolean {
+  return value === 1;
+}
+
+// 说明：导出行与 ModelUsageRecord 的差异是不带 rawUsage/providerMetadata（debug 体积大），
+// 其余字段 snake_case -> camelCase 一一对应，布尔列按 0/1 还原。
+export async function queryModelUsageRecords(
+  db: DatabaseSync,
+  input: UsageRecordsQueryInput,
+): Promise<ModelUsageQueryRow[]> {
+  const { whereSql, args } = usageRecordsWhere(input);
+  const rows = db
+    .prepare(
+      `select id, logical_request_id, attempt_index, session_id, turn_id, trace_id, span_id,
+         assistant_message_id, parent_user_message_id, query_source, provider_id, model_id,
+         variant, agent, mode, task_type, status, started_at, first_token_at, completed_at,
+         duration_ms, time_to_first_token_ms, finish_reason, tool_call_count, input_tokens,
+         output_tokens, reasoning_tokens, cache_creation_input_tokens, cache_read_input_tokens,
+         provider_total_tokens, computed_total_tokens, retry_count, retryable, cancelled_by_user,
+         context_exceeded, error_type, error_code, error_message
+       from model_usage
+       ${whereSql}
+       order by started_at asc, id asc
+       limit ?`,
+    )
+    .all(...args, input.limit ?? USAGE_RECORDS_DEFAULT_LIMIT) as Array<
+    Record<string, number | string | null>
+  >;
+
+  return rows.map((row) => ({
+    id: String(row.id),
+    logicalRequestId: String(row.logical_request_id),
+    attemptIndex: integer(row.attempt_index),
+    sessionID: String(row.session_id),
+    turnID: optionalString(row.turn_id),
+    traceID: optionalString(row.trace_id),
+    spanID: optionalString(row.span_id),
+    assistantMessageID: optionalString(row.assistant_message_id),
+    parentUserMessageID: optionalString(row.parent_user_message_id),
+    querySource: String(row.query_source),
+    providerId: String(row.provider_id),
+    modelId: String(row.model_id),
+    variant: optionalString(row.variant),
+    agent: optionalString(row.agent),
+    mode: optionalString(row.mode),
+    taskType: optionalString(row.task_type),
+    status: String(row.status) as ModelUsageQueryRow["status"],
+    startedAt: integer(row.started_at),
+    firstTokenAt: optionalNumber(row.first_token_at),
+    completedAt: optionalNumber(row.completed_at),
+    durationMs: optionalNumber(row.duration_ms),
+    timeToFirstTokenMs: optionalNumber(row.time_to_first_token_ms),
+    finishReason: optionalString(row.finish_reason),
+    toolCallCount: integer(row.tool_call_count),
+    inputTokens: integer(row.input_tokens),
+    outputTokens: integer(row.output_tokens),
+    reasoningTokens: integer(row.reasoning_tokens),
+    cacheCreationInputTokens: integer(row.cache_creation_input_tokens),
+    cacheReadInputTokens: integer(row.cache_read_input_tokens),
+    providerTotalTokens: optionalNumber(row.provider_total_tokens),
+    computedTotalTokens: integer(row.computed_total_tokens),
+    retryCount: integer(row.retry_count),
+    retryable: flag(row.retryable),
+    cancelledByUser: flag(row.cancelled_by_user),
+    contextExceeded: flag(row.context_exceeded),
+    errorType: optionalString(row.error_type),
+    errorCode: optionalString(row.error_code),
+    errorMessage: optionalString(row.error_message),
+    // sqlite 泛型行丢失品牌类型；session/turn/trace/message id 在写入侧已按
+    // 对应品牌校验（session_id 还有外键约束），导出时整行恢复为品牌行类型。
+  }) as ModelUsageQueryRow);
+}
+
+export async function queryToolUsageRecords(
+  db: DatabaseSync,
+  input: UsageRecordsQueryInput,
+): Promise<ToolUsageQueryRow[]> {
+  const { whereSql, args } = usageRecordsWhere(input);
+  const rows = db
+    .prepare(
+      `select id, session_id, turn_id, trace_id, tool_call_id, tool_name, side_effect_scope,
+         read_only, destructive, approval_status, status, started_at, first_output_at,
+         completed_at, duration_ms, time_to_first_output_ms, exit_code, output_bytes,
+         stdout_bytes, stderr_bytes, truncated, retry_count, retryable, cancelled_by_user,
+         error_type, error_code, error_message
+       from tool_usage
+       ${whereSql}
+       order by started_at asc, id asc
+       limit ?`,
+    )
+    .all(...args, input.limit ?? USAGE_RECORDS_DEFAULT_LIMIT) as Array<
+    Record<string, number | string | null>
+  >;
+
+  return rows.map((row) => ({
+    id: String(row.id),
+    sessionID: String(row.session_id),
+    turnID: optionalString(row.turn_id),
+    traceID: optionalString(row.trace_id),
+    toolCallID: String(row.tool_call_id),
+    toolName: String(row.tool_name),
+    sideEffectScope: optionalString(row.side_effect_scope),
+    readOnly: row.read_only === null ? undefined : flag(row.read_only),
+    destructive: row.destructive === null ? undefined : flag(row.destructive),
+    approvalStatus: optionalString(row.approval_status),
+    status: String(row.status) as ToolUsageQueryRow["status"],
+    startedAt: integer(row.started_at),
+    firstOutputAt: optionalNumber(row.first_output_at),
+    completedAt: optionalNumber(row.completed_at),
+    durationMs: optionalNumber(row.duration_ms),
+    timeToFirstOutputMs: optionalNumber(row.time_to_first_output_ms),
+    exitCode: optionalNumber(row.exit_code),
+    outputBytes: integer(row.output_bytes),
+    stdoutBytes: integer(row.stdout_bytes),
+    stderrBytes: integer(row.stderr_bytes),
+    truncated: flag(row.truncated),
+    retryCount: integer(row.retry_count),
+    retryable: flag(row.retryable),
+    cancelledByUser: flag(row.cancelled_by_user),
+    errorType: optionalString(row.error_type),
+    errorCode: optionalString(row.error_code),
+    errorMessage: optionalString(row.error_message),
+    // 与 model 行一致：sqlite 泛型行丢失品牌类型，写入侧已校验，整行恢复。
+  }) as ToolUsageQueryRow);
 }
