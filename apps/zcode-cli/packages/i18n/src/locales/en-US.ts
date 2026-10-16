@@ -22,6 +22,8 @@ Commands:
   logout     Remove the shared Z.AI login credentials
   plugins    Manage plugins and marketplaces (\`plugins list|install|uninstall|enable|disable|update|validate|marketplace ...\`; alias: plugin)
   skills     List local skills (\`skills list\`)
+  stream     RTSP network stream monitoring (\`stream list|analyze|watch|events\`; credentials live in ~/.zcode/cli/streams.json, alerts are retained for 30 days)
+  usage      Export token usage stats (summary of the last 7 days by default; --json for NDJSON details, --session <id> for a session transcript, --sessions to list sessions; data is retained for 30 days)
   tui        Open the terminal UI
   version    Print the CLI version
 
@@ -30,6 +32,7 @@ Options:
   -v, --version    Show version
   -p, --prompt <text>  Run a single prompt without opening the TUI
   --memory-bench   With --prompt, enable automatic Memory extraction and wait before exiting (requires Memory enabled)
+  --pdf-password <pw>  With --prompt/--target, password for password-protected PDFs (one value for all files this run; visible to other local processes via the process list)
   --browser-use <mode> Enable Browser Use backend (supported: headless)
   --surface <surface>  Presentation surface for headless prompts/app-server: terminal or desktop
   --browser-executable <path> Chrome/Chromium executable for headless Browser Use

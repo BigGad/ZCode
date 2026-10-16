@@ -11,8 +11,11 @@ export * from "./interfaces/context-source.port.js";
 export * from "./interfaces/provider-endpoint-routing.port.js";
 export * from "./interfaces/http-client.port.js";
 export * from "./interfaces/image-processor.port.js";
+export * from "./interfaces/live-capture.port.js";
 export * from "./interfaces/pdf-document.port.js";
+export * from "./interfaces/video-frame.port.js";
 export * from "./interfaces/permission.port.js";
+export * from "./interfaces/workspace-resource-index.port.js";
 export * from "./interfaces/session.port.js";
 export * from "./interfaces/session-mailbox.port.js";
 export * from "./interfaces/session-store.port.js";
@@ -89,6 +92,7 @@ export * from "./path/index.js";
 
 // Network
 export * from "./network/public-egress-ip.js";
+export * from "./network/redact-url.js";
 
 // Tools
 export * from "./tools/index.js";

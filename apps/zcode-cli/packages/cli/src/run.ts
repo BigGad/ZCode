@@ -18,6 +18,8 @@ import { runEmbeddedSearchCli } from "./internal-search/embedded-search-cli.js";
 import { runCommandsCommand } from "./commands-command.js";
 import { resolveCliCwd } from "./cwd.js";
 import { runLoginCommand, runLogoutCommand } from "./login-command.js";
+import { runUsageCommand } from "./usage-command.js";
+import { runStreamCommand } from "./stream-command.js";
 import { CLI_COMMAND_NAME, CLI_PROCESS_NAME } from "./process-name.js";
 import { isPluginHostInvocation, runPluginHostCommand } from "./plugin-host-command.js";
 import { isDwfChildInvocation, runDwfChildCommand } from "./dwf-child-command.js";
@@ -56,6 +58,8 @@ const BROWSER_USE_SCOPE_ERROR =
 const SURFACE_SCOPE_ERROR =
   "--surface can only be used with --prompt, --target, app-server, or agent-server.";
 const MEMORY_BENCH_SCOPE_ERROR = "--memory-bench can only be used with -p/--prompt.";
+const PDF_PASSWORD_SCOPE_ERROR = "--pdf-password can only be used with --prompt or --target.";
+const PDF_PASSWORD_EMPTY_ERROR = "--pdf-password requires non-empty text.";
 
 const pluginsCommandFlags = (
   values: ReturnType<typeof parseGlobalArgs>["values"],
@@ -110,6 +114,9 @@ const globalOptions = (
     ...(values["memory-bench"] === true ? { memoryBench: true } : {}),
     noColor: values["no-color"] === true,
     ...(outputFormat ? { outputFormat } : {}),
+    ...(values["pdf-password"] !== undefined
+      ? { pdfPassword: values["pdf-password"] as string }
+      : {}),
     verbose: values.verbose === true,
   };
 };
@@ -451,6 +458,22 @@ export const run = async (ctx: RunContext, deps: RunDependencies = {}): Promise<
     return 1;
   }
 
+  // --pdf-password 只服务无头链路（-p/--target）；其他子命令入口拒绝，
+  // 避免误以为 TUI/协议服务端会消费它。空值在此拒绝，不透传给 runtime。
+  const pdfPasswordOption = parsed.values["pdf-password"] as string | undefined;
+  if (
+    pdfPasswordOption !== undefined &&
+    typeof parsed.values.prompt !== "string" &&
+    targetRequest === undefined
+  ) {
+    ctx.stderr.write(`${PDF_PASSWORD_SCOPE_ERROR}\n`);
+    return 1;
+  }
+  if (pdfPasswordOption !== undefined && pdfPasswordOption.trim().length === 0) {
+    ctx.stderr.write(`${PDF_PASSWORD_EMPTY_ERROR}\n`);
+    return 1;
+  }
+
   if (
     browserUse === "headless" &&
     !isForceMcsSupportedInvocation({
@@ -591,6 +614,33 @@ export const run = async (ctx: RunContext, deps: RunDependencies = {}): Promise<
       );
     case "skills":
       return await runSkillsCommand(ctx, options, commandDeps, parsed.positionals.slice(1));
+    case "usage":
+      return await runUsageCommand(ctx, options, {
+        ...(typeof parsed.values.since === "string" ? { since: parsed.values.since } : {}),
+        ...(typeof parsed.values.until === "string" ? { until: parsed.values.until } : {}),
+        ...(typeof parsed.values.session === "string" ? { session: parsed.values.session } : {}),
+        ...(parsed.values.sessions === true ? { sessions: true } : {}),
+        ...(typeof parsed.values.agent === "string" ? { agent: parsed.values.agent } : {}),
+        ...(parsed.values.tools === true ? { tools: true } : {}),
+        ...(typeof parsed.values.limit === "string" ? { limit: Number(parsed.values.limit) } : {}),
+        json: options.json === true,
+      });
+    case "stream":
+      return await runStreamCommand(ctx, options, {
+        subcommand: parsed.positionals[1],
+        ...(typeof parsed.values.stream === "string" ? { stream: parsed.values.stream } : {}),
+        ...(parsed.values.once === true ? { once: true } : {}),
+        ...(parsed.values.follow === true ? { follow: true } : {}),
+        ...(typeof parsed.values.since === "string" ? { since: parsed.values.since } : {}),
+        ...(typeof parsed.values.until === "string" ? { until: parsed.values.until } : {}),
+        ...(typeof parsed.values.limit === "string" ? { limit: Number(parsed.values.limit) } : {}),
+        ...(typeof parsed.values.status === "string" ? { status: parsed.values.status } : {}),
+        ...(typeof parsed.values.config === "string" ? { config: parsed.values.config } : {}),
+        ...(typeof parsed.values.duration === "string" ? { duration: parsed.values.duration } : {}),
+        ...(parsed.values.forever === true ? { forever: true } : {}),
+        ...(parsed.values.daemon === true ? { daemon: true } : {}),
+        version,
+      });
     case "tui":
       return await runTuiCommand(
         ctx,

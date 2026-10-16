@@ -82,6 +82,11 @@ export interface ToolArtifactStatResult {
   mtimeMs?: number;
 }
 
+export interface ToolArtifactDeleteRequest {
+  uri: string;
+  trace?: TraceContext;
+}
+
 export interface ImageAttachmentPathPrimeRequest {
   uri: string;
   bytes: Uint8Array;
@@ -129,6 +134,15 @@ export interface ToolArtifactStorePort {
     request: ToolArtifactStatRequest,
     options?: { signal?: AbortSignal },
   ): Promise<ToolArtifactStatResult>;
+  /**
+   * 删除 artifact 文件（stream-monitor segment 保留窗口清理等长期运行场景消费）。
+   * 可选：消费方 `typeof` 探测，缺席即「本 store 不支持删除」——调用方降级为
+   * 仅依赖上层 retention 策略（stream-input.md Continuous watch mode 节）。
+   */
+  deleteToolResultArtifact?(
+    request: ToolArtifactDeleteRequest,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ deleted: boolean }>;
   primeImageAttachmentPath?(
     request: ImageAttachmentPathPrimeRequest,
   ): Promise<MediaAttachmentPathResult>;

@@ -7,6 +7,10 @@ import { MAX_WEBFETCH_URL_CHARS } from "./webfetch-constants.js";
 import { isWebFetchIpLiteral } from "./webfetch-egress-guard.js";
 import { webFetchError } from "./webfetch-errors.js";
 
+// redactUrlCredentials 提升至 util/redact-url（stream 域复用）；re-export 保持既有 import 路径。
+export { redactUrlCredentials } from "../../util/redact-url.js";
+import { redactUrlCredentials } from "../../util/redact-url.js";
+
 export function normalizeWebFetchUrl(value: string): URL {
   if (value.length > MAX_WEBFETCH_URL_CHARS) {
     throw webFetchError("InvalidUrl", "URL is too long", {
@@ -78,13 +82,6 @@ export function isPermittedRedirect(from: URL, to: URL): boolean {
   }
 
   return true;
-}
-
-export function redactUrlCredentials(url: URL): string {
-  const clone = new URL(url);
-  clone.username = "";
-  clone.password = "";
-  return clone.toString();
 }
 
 function assertPublicHost(url: URL): void {

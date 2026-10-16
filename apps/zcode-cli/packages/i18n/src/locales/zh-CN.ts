@@ -22,6 +22,8 @@ export const zhCN: ZCodeCopy = {
   logout     删除共享的 Z.AI 登录凭据
   plugins    管理插件与市场（\`plugins list|install|uninstall|enable|disable|update|validate|marketplace ...\`；别名 plugin）
   skills     列出本地 skills（\`skills list\`）
+  stream     RTSP 网络流持续监控（\`stream list|analyze|watch|events\`；凭据存 ~/.zcode/cli/streams.json，告警保留 30 天）
+  usage      导出 token 用量统计（默认汇总最近 7 天；--json 输出 NDJSON 明细，--session <id> 导出会话消息，--sessions 列出会话；数据保留 30 天）
   tui        打开终端 UI
   version    打印 CLI 版本
 
@@ -30,6 +32,7 @@ export const zhCN: ZCodeCopy = {
   -v, --version    显示版本
   -p, --prompt <text>  单次运行 prompt，不打开 TUI
   --memory-bench   配合 --prompt 开启自动 Memory 提取并等待后退出（需已开启 Memory）
+  --pdf-password <pw>  配合 --prompt/--target 提供密码 PDF 的密码（单值适用于本次所有文件；进程列表对本机其他进程可见）
   --browser-use <mode> 启用 Browser Use backend（当前支持：headless）
   --surface <surface>  设置无头 prompt/app-server 的呈现面：terminal 或 desktop
   --browser-executable <path> headless Browser Use 使用的 Chrome/Chromium 路径
