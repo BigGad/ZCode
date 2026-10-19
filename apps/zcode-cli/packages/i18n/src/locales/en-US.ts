@@ -21,6 +21,7 @@ Commands:
   login [zai|bigmodel]  Sign in through browser authorization
   logout     Remove the shared Z.AI login credentials
   plugins    Manage plugins and marketplaces (\`plugins list|install|uninstall|enable|disable|update|validate|marketplace ...\`; alias: plugin)
+  recognize  Batch-recognize an image folder (\`recognize <folder> [--schema description|qa|structured]\`; 4 subagents by default, one per image)
   skills     List local skills (\`skills list\`)
   stream     RTSP network stream monitoring (\`stream list|analyze|watch|events\`; credentials live in ~/.zcode/cli/streams.json, alerts are retained for 30 days)
   usage      Export token usage stats (summary of the last 7 days by default; --json for NDJSON details, --session <id> for a session transcript, --sessions to list sessions; data is retained for 30 days)

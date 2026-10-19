@@ -19,6 +19,7 @@ import { runCommandsCommand } from "./commands-command.js";
 import { resolveCliCwd } from "./cwd.js";
 import { runLoginCommand, runLogoutCommand } from "./login-command.js";
 import { runUsageCommand } from "./usage-command.js";
+import { runRecognizeCommand } from "./recognize-command.js";
 import { runStreamCommand } from "./stream-command.js";
 import { CLI_COMMAND_NAME, CLI_PROCESS_NAME } from "./process-name.js";
 import { isPluginHostInvocation, runPluginHostCommand } from "./plugin-host-command.js";
@@ -625,6 +626,25 @@ export const run = async (ctx: RunContext, deps: RunDependencies = {}): Promise<
         ...(typeof parsed.values.limit === "string" ? { limit: Number(parsed.values.limit) } : {}),
         json: options.json === true,
       });
+    case "recognize":
+      return await runRecognizeCommand(ctx, options, {
+        folder: parsed.positionals[1],
+        ...(typeof parsed.values.model === "string" ? { model: parsed.values.model } : {}),
+        ...(typeof parsed.values.schema === "string" ? { schema: parsed.values.schema } : {}),
+        ...(Array.isArray(parsed.values.fields)
+          ? { fields: parsed.values.fields as string[] }
+          : {}),
+        ...(Array.isArray(parsed.values.questions)
+          ? { questions: parsed.values.questions as string[] }
+          : {}),
+        ...(typeof parsed.values["max-concurrency"] === "string"
+          ? { maxConcurrency: parsed.values["max-concurrency"] }
+          : {}),
+        ...(parsed.values.recursive === true ? { recursive: true } : {}),
+        ...(typeof parsed.values["image-glob"] === "string"
+          ? { imageGlob: parsed.values["image-glob"] }
+          : {}),
+      }, commandDeps);
     case "stream":
       return await runStreamCommand(ctx, options, {
         subcommand: parsed.positionals[1],

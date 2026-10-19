@@ -75,6 +75,11 @@ import type {
   HookRunner,
   TurnId,
 } from "./deps.js";
+import type {
+  AgentOutput,
+  SubagentRunOptions,
+  SubagentRunRequest,
+} from "@zcode/contracts";
 import { installAgentRuntimeMethods } from "./methods/index.js";
 import type { StartSavedWorkflowRunResult } from "./methods/dynamic-workflow-run-start.js";
 import type {
@@ -410,12 +415,29 @@ export class AgentRuntime {
     // 因此必须先终止该 runtime 的 Extraction，不能只在超时后放弃等待。
     this.memoryExtractionScheduler?.shutdown();
   }
+
+  /**
+   * 直接运行一个前台子代理（顶层命令——如 `zcode recognize`——确定性扇出的公开入口）。
+   *
+   * SubagentPort 本是 private 成员：它仅供工具执行器经 `Agent` 工具、或本 runtime 内部的
+   * background 流程驱动。这里把 `run` 提升为公开方法，供 CLI 顶层命令（无真实 tool call、
+   * 需要确定性并发 spawn N 个子代理）复用同一套已验证的子代理执行实现，而不是绕过 runtime
+   * 另起炉灶。子代理被禁用（`subagents.enabled === false`）时抛错，由调用方翻译成 exit code。
+   */
+  runSubagent(request: SubagentRunRequest, options?: SubagentRunOptions): Promise<AgentOutput> {
+    if (this.subagentPort === undefined) {
+      throw new Error("Subagents are disabled in this runtime (subagents.enabled=false).");
+    }
+    return this.subagentPort.run(request, options);
+  }
 }
 
 export interface AgentRuntime {
   lastPermissionGrantId?: string;
   beginShutdown(): void;
   closeBrowserSession(): Promise<void>;
+  /** 直接运行一个前台子代理；子代理禁用时抛错。见 class 实现注释。 */
+  runSubagent(request: SubagentRunRequest, options?: SubagentRunOptions): Promise<AgentOutput>;
   updateConfig(
     patch: Pick<AgentRuntimeConfig, "mode" | "planEnabled" | "language" | "outputStyle">,
   ): void;

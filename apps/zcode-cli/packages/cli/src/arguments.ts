@@ -158,6 +158,31 @@ export const parseGlobalArgs = (argv: string[]) =>
       daemon: {
         type: "boolean",
       },
+      // `zcode recognize` 子命令旗标：图片文件夹批量多模态识别（严格解析器要求全局注册，
+      // 作用域校验在 recognize-command.ts 的 resolveScope）。
+      model: {
+        type: "string",
+      },
+      schema: {
+        type: "string",
+      },
+      fields: {
+        multiple: true,
+        type: "string",
+      },
+      questions: {
+        multiple: true,
+        type: "string",
+      },
+      "max-concurrency": {
+        type: "string",
+      },
+      recursive: {
+        type: "boolean",
+      },
+      "image-glob": {
+        type: "string",
+      },
     },
     strict: true,
   });

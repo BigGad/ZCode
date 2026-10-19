@@ -21,6 +21,7 @@ export const zhCN: ZCodeCopy = {
   login [zai|bigmodel]  通过浏览器授权登录
   logout     删除共享的 Z.AI 登录凭据
   plugins    管理插件与市场（\`plugins list|install|uninstall|enable|disable|update|validate|marketplace ...\`；别名 plugin）
+  recognize  批量识别图片文件夹（\`recognize <folder> [--schema description|qa|structured]\`；默认并发 4，逐张派发子代理）
   skills     列出本地 skills（\`skills list\`）
   stream     RTSP 网络流持续监控（\`stream list|analyze|watch|events\`；凭据存 ~/.zcode/cli/streams.json，告警保留 30 天）
   usage      导出 token 用量统计（默认汇总最近 7 天；--json 输出 NDJSON 明细，--session <id> 导出会话消息，--sessions 列出会话；数据保留 30 天）

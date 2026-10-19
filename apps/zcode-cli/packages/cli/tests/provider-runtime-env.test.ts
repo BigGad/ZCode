@@ -152,6 +152,33 @@ test("does not resolve provider assets for commands that do not run Core", async
   }
 });
 
+test("resolves provider assets for top-level commands that create an app", async () => {
+  // 回归：`stream`/`recognize` 都要 createZCodeApp（前者跑分析 turn，后者挑视觉模型 + 跑子代理）。
+  // 漏登记时 registry 拿不到配置路径，命令会在启动期以「缺少进程 Provider Registry 路径」失败。
+  const root = await temporaryDirectory();
+  const entrypoint = join(root, "apps/zcode-cli/packages/cli/src/main.ts");
+  await mkdir(dirname(entrypoint), { recursive: true });
+  await mkdir(dirname(join(root, "config/provider/zcode-builtin.json")), { recursive: true });
+  await writeFile(entrypoint, "");
+  await writeFile(join(root, "config/provider/zcode-builtin.json"), EMPTY_RELEASE);
+
+  for (const argv of [["stream", "list"], ["recognize", "/tmp/photos"]]) {
+    const prepared = await prepareCliProviderRuntimeEnv({
+      argv,
+      dataBaseDir: join(root, "home"),
+      entrypoint,
+      env: {},
+      appVersion: "test-version",
+      platform: "test-platform",
+    });
+    assert.equal(
+      prepared[ZCODE_PERSONAL_PROVIDER_CONFIG_FILE_ENV],
+      join(root, "home/.zcode/v2/provider_config.json"),
+      `argv ${argv[0]} should resolve the personal provider config`,
+    );
+  }
+});
+
 async function temporaryDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "zcode-cli-provider-runtime-"));
   temporaryDirectories.push(directory);
