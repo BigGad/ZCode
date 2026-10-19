@@ -1,13 +1,11 @@
 import { readdir, stat } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
+import { IMAGE_EXTENSIONS } from "./image-extensions.js";
 
 /**
  * `zcode recognize` 的文件夹扫描（image-recognition-cli.md「State Owners」节唯一 owner）。
  * 纯 IO + 确定性排序，不持有状态、不调模型。
  */
-
-/** 白名单与 `prompt-command.ts:60` 的 IMAGE_EXTENSIONS 对齐。 */
-const IMAGE_EXTENSIONS = new Set([".gif", ".jpeg", ".jpg", ".png", ".webp"]);
 
 export interface RecognizeWalkResult {
   /** 绝对路径，按确定性顺序（大小写不敏感的全路径比较）。 */

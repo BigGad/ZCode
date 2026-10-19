@@ -14,6 +14,10 @@ import { SessionEventType, type SessionEvent } from "@zcode/contracts";
  *
  * `SubagentMessage` 类型已定义但当前 core 未从该路径 emit（spec §10.5），因此 `message` 行
  * 只认 `ModelStreaming` 的 `text_delta`。
+ *
+ * TODO(spec §10.5)：core 真正 emit `SubagentMessage` 时回到这里核对两点——
+ *  1) 同一段正文是否会既走 `SubagentMessage` 又走 `text_delta`（重复计数，需要去重或二选一）；
+ *  2) `SubagentMessage` 若不带 `childSessionId`，还需为其补一条归并键。
  */
 
 export type RecognizeProgressStage = "started" | "message" | "stopped";

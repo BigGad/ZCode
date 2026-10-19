@@ -10,6 +10,7 @@ import {
 } from "./command-center.js";
 import { loadCliDotenv } from "./env.js";
 import { createCliHeadlessBrowserRuntime } from "./headless-browser.js";
+import { IMAGE_EXTENSIONS } from "./image-extensions.js";
 import {
   createHeadlessPermissionBroker,
   createHeadlessSessionObserver,
@@ -57,7 +58,6 @@ const wantsJsonSummary = (options: GlobalOptions): boolean =>
 const wantsEventStream = (options: GlobalOptions): boolean =>
   options.outputFormat === "stream-json";
 
-const IMAGE_EXTENSIONS = new Set([".gif", ".jpeg", ".jpg", ".png", ".webp"]);
 const VIDEO_EXTENSIONS = new Set([".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi"]);
 const EMPTY_PROMPT_ERROR = "--prompt requires non-empty text.";
 const MEMORY_BENCH_DISABLED_ERROR =
