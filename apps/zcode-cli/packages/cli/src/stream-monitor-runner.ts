@@ -314,10 +314,9 @@ async function createStreamAnalysisApp(
       env: appEnv,
       providerRegistry: registryRuntime.runtime.registryService,
       configuredDefaultModelSelection: registryRuntime.configuredDefaultModelSelection,
-      ...(registryRuntime.configuredCapabilityModelSelections
+      ...(registryRuntime.configuredModelSelections
         ? {
-            configuredCapabilityModelSelections:
-              registryRuntime.configuredCapabilityModelSelections,
+            configuredModelSelections: registryRuntime.configuredModelSelections,
           }
         : {}),
       ...(registryRuntime.providerRuntimeHeadersPort

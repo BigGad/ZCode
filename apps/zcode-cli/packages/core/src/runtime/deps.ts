@@ -124,7 +124,7 @@ export type {
   CompactBoundaryPayload,
   CompactPreservedSegment,
   CompactTimelinePayload,
-  CapabilityModelSelections,
+  ModelSelections,
   MessageAnchorOrigin,
   MessageId,
   MessageWithParts,

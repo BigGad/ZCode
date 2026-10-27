@@ -34,6 +34,7 @@ Options:
   -p, --prompt <text>  Run a single prompt without opening the TUI
   --memory-bench   With --prompt, enable automatic Memory extraction and wait before exiting (requires Memory enabled)
   --pdf-password <pw>  With --prompt/--target, password for password-protected PDFs (one value for all files this run; visible to other local processes via the process list)
+  --model-type <name>  Use a named model type from Personal Provider Config (modelSelections) for this run
   --browser-use <mode> Enable Browser Use backend (supported: headless)
   --surface <surface>  Presentation surface for headless prompts/app-server: terminal or desktop
   --browser-executable <path> Chrome/Chromium executable for headless Browser Use

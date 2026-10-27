@@ -85,10 +85,10 @@ export async function prepareTuiAppRuntime(
   const configuredDefaultModelSelection = providerRegistryRuntime?.modelSelectionConfigRepository
     ? await providerRegistryRuntime.modelSelectionConfigRepository.read()
     : providerRegistryRuntime?.configuredDefaultModelSelection;
-  // 能力模型选择与默认选择同源（同一份 Personal 文件），取法保持一致。
-  const configuredCapabilityModelSelections = providerRegistryRuntime?.modelSelectionConfigRepository
-    ? await providerRegistryRuntime.modelSelectionConfigRepository.readCapabilitySelections()
-    : providerRegistryRuntime?.configuredCapabilityModelSelections;
+  // 命名模型类型与默认选择同源（同一份 Personal 文件），取法保持一致。
+  const configuredModelSelections = providerRegistryRuntime?.modelSelectionConfigRepository
+    ? await providerRegistryRuntime.modelSelectionConfigRepository.readModelSelections()
+    : providerRegistryRuntime?.configuredModelSelections;
   const createProviderEndpointRoutingPort =
     deps.createProviderEndpointRoutingPort ??
     bootstrapModule?.createDefaultProviderEndpointRoutingPort;
@@ -103,7 +103,7 @@ export async function prepareTuiAppRuntime(
 
   return {
     appEnv,
-    configuredCapabilityModelSelections,
+    configuredModelSelections,
     configuredDefaultModelSelection,
     createAppFactory,
     providerRegistryRuntime,

@@ -39,7 +39,7 @@ type ResolveAttachmentOptions = {
   imageProcessorPort?: ImageProcessorPort;
   modelInputFormat?: ModelInputFormat;
   /**
-   * 图片理解端口（capability-model-selection.md §5）。
+   * 图片理解端口（model-selections.md §5）。
    *
    * 只有主模型**显式不支持图片**（`modelInputFormat.supportsImage === false`）时才调用；
    * 端口缺席或返回空，都保留原 image block，走既有 omitted-media 降级。

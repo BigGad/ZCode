@@ -43,6 +43,12 @@ export const parseGlobalArgs = (argv: string[]) =>
       "pdf-password": {
         type: "string",
       },
+      // `--model-type <名字>`：按命名模型类型点名本次运行的主模型（model-selections.md §6）。
+      // 与 `zcode recognize` 自己的 `--model <providerId>/<modelId>` 取值格式不同、职责不同，
+      // 两个旗标并存不冲突。
+      "model-type": {
+        type: "string",
+      },
       cwd: {
         type: "string",
       },

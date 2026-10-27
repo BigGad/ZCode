@@ -35,6 +35,8 @@ export type GlobalOptions = {
   json: boolean;
   locale?: GlobalLocale;
   memoryBench?: boolean;
+  /** 命名模型类型名（--model-type）：本次运行点名的模型类型；undefined = 未点名。 */
+  modelType?: string;
   noColor: boolean;
   outputFormat?: GlobalOutputFormat;
   /** 全局 PDF 密码（--pdf-password）：无头运行所有密码 PDF 共用；undefined = 未提供。 */

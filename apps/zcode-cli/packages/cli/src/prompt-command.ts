@@ -11,6 +11,7 @@ import {
 import { loadCliDotenv } from "./env.js";
 import { createCliHeadlessBrowserRuntime } from "./headless-browser.js";
 import { IMAGE_EXTENSIONS } from "./image-extensions.js";
+import { resolveRequestedModelType } from "./model-type.js";
 import {
   createHeadlessPermissionBroker,
   createHeadlessSessionObserver,
@@ -236,6 +237,21 @@ export const runPrompt = async (
       env,
       workingDirectory,
     });
+    // --model-type：按命名模型类型点名本次运行的主模型（model-selections.md §6）。
+    // 解析不出来是用户输入问题，就地报错退出，不建 App。
+    // 没点名就不去读 Registry 视图：这条路径与模型选择无关。
+    const modelTypeSelection = options.modelType
+      ? resolveRequestedModelType({
+          name: options.modelType,
+          configured: providerRegistryRuntime.configuredModelSelections,
+          registry: providerRegistryRuntime.runtime.registryService.getView(),
+        })
+      : {};
+    if (modelTypeSelection.error) {
+      ctx.stderr.write(`${modelTypeSelection.error}\n`);
+      providerRegistryRuntime.dispose();
+      return 1;
+    }
     browserRuntime = createCliHeadlessBrowserRuntime(options, deps);
     app = await createApp({
       browserControlPort: browserRuntime?.browserControlPort,
@@ -250,10 +266,9 @@ export const runPrompt = async (
       ...(providerEndpointRoutingPort ? { providerEndpointRoutingPort } : {}),
       providerRegistry: providerRegistryRuntime.runtime.registryService,
       configuredDefaultModelSelection: providerRegistryRuntime.configuredDefaultModelSelection,
-      ...(providerRegistryRuntime.configuredCapabilityModelSelections
+      ...(providerRegistryRuntime.configuredModelSelections
         ? {
-            configuredCapabilityModelSelections:
-              providerRegistryRuntime.configuredCapabilityModelSelections,
+            configuredModelSelections: providerRegistryRuntime.configuredModelSelections,
           }
         : {}),
       ...(providerRegistryRuntime.providerRuntimeHeadersPort
@@ -271,6 +286,8 @@ export const runPrompt = async (
         modelStreaming: "on",
         presentationSurface,
         workingDirectory,
+        // --model-type 点名的模型优先于 defaultModelSelection。
+        ...(modelTypeSelection.selection ? { modelSelection: modelTypeSelection.selection } : {}),
       },
       sessionId,
       uiDetectedLocale: options.detectedLocale,

@@ -1214,7 +1214,7 @@ async function drainPendingInputUnlocked(
     const resolvedAttachments = await resolveTurnAttachments(pendingInput.attachments, {
       artifactStore: this.artifactStore,
       fileSystemPort: this.fileSystemPort,
-      // 主模型不支持图片时，用能力模型把图片读成文字（capability-model-selection.md §5）。
+      // 主模型不支持图片时，用能力模型把图片读成文字（model-selections.md §5）。
       imageDescription: resolveCapabilityImageDescriptionPort(this, {
         traceContext: drainTraceContext,
       }),

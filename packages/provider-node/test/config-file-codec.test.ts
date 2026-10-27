@@ -192,33 +192,31 @@ describe("provider-node private config codecs", () => {
     );
   });
 
-  it("round-trips capability model selections and keeps unknown capability keys", () => {
-    const capabilityModelSelections = {
+  it("round-trips named model selections and keeps unknown type names", () => {
+    const modelSelections = {
       image: { providerId: "vision", modelId: "vision-model" },
-      // 未知能力键：保留在用户文件里但没有消费方，不能让整份配置读取失败。
+      // 未知类型名：保留在用户文件里但没有消费方，不能让整份配置读取失败。
       audio: { providerId: "audio", modelId: "audio-model" },
     };
     const encoded = encodeProviderConfigFile({
       providers: ProviderConfigMap.empty(),
       models: ModelConfigRules.empty(),
-      capabilityModelSelections,
+      modelSelections,
     });
 
-    expect(encoded.config.capabilityModelSelections).toEqual(capabilityModelSelections);
-    expect(decodeProviderConfigFile(encoded).capabilityModelSelections).toEqual(
-      capabilityModelSelections,
-    );
+    expect(encoded.config.modelSelections).toEqual(modelSelections);
+    expect(decodeProviderConfigFile(encoded).modelSelections).toEqual(modelSelections);
     expect(encodeProviderConfigFile(decodeProviderConfigFile(encoded))).toEqual(encoded);
   });
 
-  it("rejects a malformed capability model selection entry", () => {
+  it("rejects a malformed named model selection entry", () => {
     expect(() =>
       decodeProviderConfigFile({
         schemaVersion: 1,
         config: {
           providerConfigRules: { providerRules: [] },
           modelConfigRules: { providerModelRules: [], manualProviderModelRules: [] },
-          capabilityModelSelections: { image: { providerId: "", modelId: "m" } },
+          modelSelections: { image: { providerId: "", modelId: "m" } },
         },
       }),
     ).toThrow();

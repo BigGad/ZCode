@@ -34,6 +34,7 @@ export const zhCN: ZCodeCopy = {
   -p, --prompt <text>  单次运行 prompt，不打开 TUI
   --memory-bench   配合 --prompt 开启自动 Memory 提取并等待后退出（需已开启 Memory）
   --pdf-password <pw>  配合 --prompt/--target 提供密码 PDF 的密码（单值适用于本次所有文件；进程列表对本机其他进程可见）
+  --model-type <名字>  用 Personal Provider Config 里 modelSelections 的命名模型类型跑本次运行
   --browser-use <mode> 启用 Browser Use backend（当前支持：headless）
   --surface <surface>  设置无头 prompt/app-server 的呈现面：terminal 或 desktop
   --browser-executable <path> headless Browser Use 使用的 Chrome/Chromium 路径

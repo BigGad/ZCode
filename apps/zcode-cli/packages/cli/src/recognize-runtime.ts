@@ -1,12 +1,13 @@
 import { createRootTraceContext, type AgentOutput, type SessionId, type TraceId } from "@zcode/contracts";
 import { createDenyPermissionBroker } from "@zcode/core";
-import { resolveConfiguredCapabilityModelSelections } from "@zcode/provider";
+import { resolveCapabilityModelSelections } from "@zcode/provider";
 import type { ZCodeAppOptions } from "@zcode/bootstrap";
 import type { ModelSelection } from "@zcode/shared/model-selection";
 import type { GlobalOptions } from "@zcode/shared-types";
 import { loadBootstrapModule } from "./bootstrap-loader.js";
 import { createImageRecognizerAgentProfile, IMAGE_RECOGNIZER_AGENT_TYPE } from "./recognize-agent.js";
 import { judgeRecognizeGrounding, RECOGNIZE_UNGROUNDED_MESSAGE } from "./recognize-grounding.js";
+import { resolveRequestedModelType } from "./model-type.js";
 import type { ImageModelCandidate } from "./recognize-model.js";
 import {
   buildRecognizeDispatchPrompt,
@@ -50,7 +51,11 @@ export function createRecognizePermissionBroker(): NonNullable<
 export interface RecognizeRuntime {
   app: Awaited<ReturnType<Awaited<ReturnType<typeof loadBootstrapModule>>["createZCodeApp"]>>;
   candidates: readonly ImageModelCandidate[];
-  /** 能力模型配置里的图片理解选择（capability-model-selection.md §6）。 */
+  /** `--model-type` 点名的模型类型（model-selections.md §6）。 */
+  configuredModelType?: ModelSelection;
+  /** `--model-type` 指向不存在的类型时的提示；命令层据此报错退出 1。 */
+  modelTypeError?: string;
+  /** 能力键 `image` 的类型（用户显式声明的「图片理解用这个模型」）。 */
   configuredCapability?: ModelSelection;
   configuredDefault?: ModelSelection;
   dispose: () => Promise<void>;
@@ -75,10 +80,9 @@ export async function createRecognizeRuntime(input: {
       permissionBroker: createRecognizePermissionBroker(),
       providerRegistry: registryRuntime.runtime.registryService,
       configuredDefaultModelSelection: registryRuntime.configuredDefaultModelSelection,
-      ...(registryRuntime.configuredCapabilityModelSelections
+      ...(registryRuntime.configuredModelSelections
         ? {
-            configuredCapabilityModelSelections:
-              registryRuntime.configuredCapabilityModelSelections,
+            configuredModelSelections: registryRuntime.configuredModelSelections,
           }
         : {}),
       ...(registryRuntime.providerRuntimeHeadersPort
@@ -97,11 +101,17 @@ export async function createRecognizeRuntime(input: {
       },
     });
     const snapshot = registryRuntime.runtime.registryService.getSnapshot();
-    // 能力模型要走 Registry 解析：既要确认模型真的支持图像，也要补齐可执行的推理档位
-    // （Model Factory 只接受完整选择，缺档位会直接报错）。
-    const capabilityModel = resolveConfiguredCapabilityModelSelections({
-      configured: registryRuntime.configuredCapabilityModelSelections,
-      registry: snapshot?.registry ?? { revision: 0, providers: [] },
+    const registryView = snapshot?.registry ?? { revision: 0, providers: [] };
+    // 能力键与点名类型都要走 Registry 解析：既要确认模型真的支持图像，也要补齐可执行的
+    // 推理档位（Model Factory 只接受完整选择，缺档位会直接报错）。
+    const capabilityModel = resolveCapabilityModelSelections({
+      configured: registryRuntime.configuredModelSelections,
+      registry: registryView,
+    });
+    const modelType = resolveRequestedModelType({
+      name: input.options.modelType,
+      configured: registryRuntime.configuredModelSelections,
+      registry: registryView,
     });
     return {
       app,
@@ -109,6 +119,8 @@ export async function createRecognizeRuntime(input: {
       ...(registryRuntime.configuredDefaultModelSelection
         ? { configuredDefault: registryRuntime.configuredDefaultModelSelection }
         : {}),
+      ...(modelType.selection ? { configuredModelType: modelType.selection } : {}),
+      ...(modelType.error ? { modelTypeError: modelType.error } : {}),
       ...(capabilityModel.selections.image
         ? { configuredCapability: capabilityModel.selections.image }
         : {}),

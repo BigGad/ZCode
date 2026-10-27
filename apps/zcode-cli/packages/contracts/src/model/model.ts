@@ -12,8 +12,8 @@ import type { ModelPropertiesData, ModelOptionSpecsData } from "@zcode/shared/mo
 
 export type { ModelSelection } from "@zcode/shared/model-selection";
 export type {
-  CapabilityModelSelections,
   ModelCapability,
+  ModelSelections,
 } from "@zcode/shared/model-selection";
 
 // 仅保留 CLI 公共类型名，字段来自同一数据 Schema，不复制 Provider 配置定义。

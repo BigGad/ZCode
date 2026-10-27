@@ -6,7 +6,7 @@ import { auxiliaryModelOptions } from "../../model/auxiliary-model-options.js";
 import { createRuntimeModel } from "./runtime-model.js";
 
 /**
- * 能力模型代为理解图片（capability-model-selection.md §5）。
+ * 能力模型代为理解图片（model-selections.md §5）。
  *
  * 只有主模型**显式不支持图片**、且用户配置了 `capabilityModelSelections.image` 时才走这里。
  * 请求复用 `generateText` 的一次性调用路径：不进主 loop、不占主模型的重试预算，

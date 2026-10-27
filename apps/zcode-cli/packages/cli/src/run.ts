@@ -113,6 +113,9 @@ const globalOptions = (
     json: values.json === true,
     locale,
     ...(values["memory-bench"] === true ? { memoryBench: true } : {}),
+    ...(values["model-type"] !== undefined
+      ? { modelType: values["model-type"] as string }
+      : {}),
     noColor: values["no-color"] === true,
     ...(outputFormat ? { outputFormat } : {}),
     ...(values["pdf-password"] !== undefined

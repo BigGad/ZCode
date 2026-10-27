@@ -3,14 +3,14 @@ import { parseModelPickerValue, type ModelSelection } from "@zcode/shared/model-
 /**
  * `zcode recognize` 的模型选择（image-recognition-cli.md「Model Selection」节）。
  *
- * 四级优先，全部可解释：
+ * 五级优先，全部可解释：
  *  1. `--model <providerId>/<modelId>[$reasoningLevel]`（Picker 串，复用 `parseModelPickerValue`）；
- *  2. 能力模型配置 `capabilityModelSelections.image`（capability-model-selection.md §6），
- *     即用户显式声明的「图片理解用这个模型」；
- *  3. 会话已配置的默认选择**且**它支持图像输入；
- *  4. provider registry 快照里第一个支持图像输入的模型。
+ *  2. `--model-type <名字>`（命名模型类型，model-selections.md §6）；
+ *  3. 能力键 `image` 的类型（用户显式声明的「图片理解用这个模型」）；
+ *  4. 会话已配置的默认选择**且**它支持图像输入；
+ *  5. provider registry 快照里第一个支持图像输入的模型。
  *
- * 第 4 级不写字面量模型 id：能力位来自 registry 解析结果
+ * 第 5 级不写字面量模型 id：能力位来自 registry 解析结果
  * （`packages/provider/src/resolver.ts` 的 `ProviderModel.config.properties.inputFormat`），
  * 内置模型表变化时选择自动跟着变。都挑不出来时抛错——报「没有视觉模型」比伪造一个
  * 不存在的模型 id、让 provider 在请求期才失败更接近事实。
@@ -28,6 +28,7 @@ export const NO_VISION_MODEL_MESSAGE =
 
 export function pickRecognizeModelSelection(input: {
   explicit?: string;
+  configuredModelType?: ModelSelection;
   configuredCapability?: ModelSelection;
   configuredDefault?: ModelSelection;
   candidates: readonly ImageModelCandidate[];
@@ -38,7 +39,20 @@ export function pickRecognizeModelSelection(input: {
     return parseModelPickerValue(explicit);
   }
 
-  // 能力模型必须真的存在且支持图像输入；配置里写错的模型 id 不能把识别带偏。
+  // 点名的类型必须真的存在且支持图像输入；配置里写错的模型 id 不能把识别带偏。
+  const configuredModelType = input.configuredModelType;
+  if (
+    configuredModelType !== undefined &&
+    candidateSupportsImage(
+      input.candidates,
+      configuredModelType.providerId,
+      configuredModelType.modelId,
+    )
+  ) {
+    return configuredModelType;
+  }
+
+  // 能力键 image 的类型必须真的存在且支持图像输入。
   const configuredCapability = input.configuredCapability;
   if (
     configuredCapability !== undefined &&

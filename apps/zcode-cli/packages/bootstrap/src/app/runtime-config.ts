@@ -1,9 +1,9 @@
 import type { ConfigResult } from "@zcode/adapters/config";
 import { GEN_UI_OUTPUT_ROOT_ENV } from "@zcode/shared/node";
 import {
-  resolveConfiguredCapabilityModelSelections,
+  resolveCapabilityModelSelections,
   resolveInitialModelSelection,
-  type CapabilityModelSelectionIssue,
+  type ModelTypeSelectionIssue,
   type ModelSelectionOptions,
 } from "@zcode/provider";
 import { resolveBashTimeoutPolicy, type AgentProfile, type AgentRuntimeConfig } from "@zcode/core";
@@ -31,12 +31,12 @@ interface ResolvedAppRuntimeConfig {
   runtimeConfig: AgentRuntimeConfig;
   untrustedProjectMcpServers: Set<string>;
   /**
-   * 能力模型解析失败项（capability-model-selection.md §7）。
+   * 能力模型解析失败项（model-selections.md §7）。
    * 能力模型不可用时按「没有能力模型」降级，不影响主链路；这里只负责上报原因。
    */
   capabilityModelSelectionIssues: ReadonlyArray<{
     readonly capability: string;
-    readonly issue: CapabilityModelSelectionIssue;
+    readonly issue: ModelTypeSelectionIssue;
   }>;
 }
 
@@ -129,11 +129,11 @@ export function resolveAppRuntimeConfig(input: {
   );
   const runtimeBuiltInModelSelectionOverrides =
     options.runtimeConfig?.subagents?.builtInModelSelectionOverrides ?? {};
-  // 能力模型是**独立**于主模型的一条选择：这里按 Registry 事实校验一次，
+  // 能力键只是命名模型类型表里的一类键：这里按 Registry 事实把**能力键**解析出来，
   // 解析失败的能力不进入 runtimeConfig（调用方按「没有能力模型」降级）。
   const capabilityModelSelections = options.providerRegistry
-    ? resolveConfiguredCapabilityModelSelections({
-        configured: options.configuredCapabilityModelSelections,
+    ? resolveCapabilityModelSelections({
+        configured: options.configuredModelSelections,
         registry: options.providerRegistry.getView(),
       })
     : { selections: {}, issues: [] };
@@ -315,7 +315,7 @@ export function runtimeConfigLogContext(
     model: runtimeConfig.modelSelection
       ? `${runtimeConfig.modelSelection.providerId}/${runtimeConfig.modelSelection.modelId}`
       : undefined,
-    // 生效的能力模型（capability-model-selection.md）：启动日志里能直接看出
+    // 生效的能力模型（model-selections.md）：启动日志里能直接看出
     // 「图片理解走的是哪个模型」，排查「配了能力模型却没生效」不用再翻配置。
     capabilityModel: runtimeConfig.capabilityModelSelections?.image
       ? `${runtimeConfig.capabilityModelSelections.image.providerId}/${runtimeConfig.capabilityModelSelections.image.modelId}`

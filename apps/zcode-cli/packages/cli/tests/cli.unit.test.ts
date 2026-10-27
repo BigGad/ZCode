@@ -619,7 +619,7 @@ test("borrows one process provider registry for a headless prompt and disposes i
             selectionRepositoryDisposals += 1;
           },
           read: async () => ({ providerId: "provider-a", modelId: "model-a" }),
-          readCapabilitySelections: async () => undefined,
+          readModelSelections: async () => undefined,
         },
         providerRuntimeHeadersPort,
         snapshot: {} as never,
@@ -2125,7 +2125,7 @@ test("wires TUI model command into app server state", async () => {
         modelSelectionConfigRepository: {
           dispose: () => {},
           read: async () => undefined,
-          readCapabilitySelections: async () => undefined,
+          readModelSelections: async () => undefined,
           saveConfiguredDefault: async (selection: ModelSelection) => {
             savedDefaults.push(selection);
           },
@@ -6292,7 +6292,7 @@ test("reuses one process provider registry across TUI app replacements", async (
             selectionRepositoryDisposals += 1;
           },
           read: async () => ({ providerId: "provider-a", modelId: "model-a" }),
-          readCapabilitySelections: async () => undefined,
+          readModelSelections: async () => undefined,
         },
         providerRuntimeHeadersPort,
         snapshot: {} as never,

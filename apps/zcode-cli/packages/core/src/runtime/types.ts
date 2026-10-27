@@ -9,7 +9,7 @@ import type {
   AgentTelemetryCausation,
   AttachmentRef,
   BackgroundResultOriginMeta,
-  CapabilityModelSelections,
+  ModelSelections,
   ContextUsageBreakdownItem,
   CoordinatorResponsePort,
   ForkCommitBundle,
@@ -213,10 +213,11 @@ export interface AgentRuntimeConfig {
     timeoutMs?: number;
   };
   /**
-   * 能力 → 模型选择（capability-model-selection.md）。主模型自己支持该能力时不使用；
-   * 只有主模型**显式不支持**且本轮存在该能力附件时，才用对应能力模型代为理解。
+   * 能力键 → 模型选择（model-selections.md §5）。这是 `modelSelections` 表里**能力键**
+   * 的解析结果，不是整张表：主模型自己支持该能力时不使用；只有主模型**显式不支持**
+   * 且本轮存在该能力附件时，才用对应能力模型代为理解。
    */
-  capabilityModelSelections?: CapabilityModelSelections;
+  capabilityModelSelections?: ModelSelections;
   parentSessionId?: SessionId;
   taskType?: SessionTaskType;
   /**
@@ -819,7 +820,7 @@ export interface ResolvedTurnAttachment {
 }
 
 /**
- * 图片理解端口（capability-model-selection.md §5）。
+ * 图片理解端口（model-selections.md §5）。
  *
  * 只在主模型**显式不支持图片**时调用：把图片交给能力模型，返回它的描述文本。
  * 返回 undefined 表示「没能描述」——调用方保留原 image block，走既有 omitted-media 降级。

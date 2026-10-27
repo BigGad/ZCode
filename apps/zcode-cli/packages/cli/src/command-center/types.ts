@@ -8,6 +8,7 @@ import type {
 } from "@zcode/tui";
 import type { SupportedLocale, UiLocale } from "@zcode/i18n";
 import type { ModelSelection, ZCodeModelOption } from "@zcode/shared";
+import type { ModelTypeOption } from "../model-type.js";
 import type { DynamicWorkflowMode } from "@zcode/shared";
 import type {
   BackgroundTaskCancelResult,
@@ -307,6 +308,8 @@ export type CommandCenterDeps = {
   listSessions?: () => Promise<CommandCenterSession[]>;
   listCustomCommands?: () => Promise<CommandCenterCustomCommandListOutcome>;
   listSkills?: () => Promise<CommandCenterSkillListOutcome>;
+  /** 命名模型类型（model-selections.md §6）：`/model-type` 的候选来源。 */
+  listModelTypes?: () => Promise<readonly ModelTypeOption[]>;
   login?: (options?: CommandCenterLoginOptions) => Promise<CommandCenterLoginResult>;
   loginBigmodel?: (
     options?: CommandCenterBigmodelLoginOptions,

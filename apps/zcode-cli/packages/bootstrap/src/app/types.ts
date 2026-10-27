@@ -99,8 +99,8 @@ import type {
 } from "@zcode/shared";
 import type { McpAppsToolVisibility } from "@zcode/shared/mcp-apps";
 import type {
-  CapabilityModelSelections,
   EffectiveModelSelectionResult,
+  ModelSelections,
 } from "@zcode/shared/model-selection";
 import type {
   WorkspaceHookReviewDecision,
@@ -164,10 +164,12 @@ export interface ZCodeAppOptions {
   /** 新 Session 使用的 Environment 默认选择；仅在没有显式 runtime modelSelection 时参与初始化。 */
   configuredDefaultModelSelection?: ModelSelection;
   /**
-   * 能力 → 模型选择（capability-model-selection.md）。主模型不支持某能力时，
-   * 由对应能力模型代为理解；每个能力独立生效，互不影响。
+   * 命名模型类型表（model-selections.md）：类型名 → 模型选择。
+   *
+   * 两个消费方共用这一张表：能力键（当前只有 `image`）由 runtime 在主模型不支持该能力时
+   * 自动取用；其余类型名由调用方（CLI `--model-type`）按需点名。
    */
-  configuredCapabilityModelSelections?: CapabilityModelSelections;
+  configuredModelSelections?: ModelSelections;
   modelIoFullRetentionEnabled?: boolean;
   /** 同进程嵌入宿主可注入完整的 borrowed 进程级 Owner；Endpoint 配置不得覆盖它。 */
   telemetryOwner?: AgentTelemetryRuntimeOwner;

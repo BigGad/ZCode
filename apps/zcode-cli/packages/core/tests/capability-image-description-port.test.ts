@@ -4,7 +4,7 @@ import { createTestRuntimeModel } from "./test-runtime-model.js";
 import type { AgentRuntimeInternal } from "../src/runtime/internal.js";
 
 /**
- * 能力模型图片描述端口（capability-model-selection.md §5.2/§5.3）。
+ * 能力模型图片描述端口（model-selections.md §5.2/§5.3）。
  *
  * 端口是旁路调用：失败（含建不出 Model）必须返回 undefined 让调用方保留原 image block，
  * 不能把整轮带崩。

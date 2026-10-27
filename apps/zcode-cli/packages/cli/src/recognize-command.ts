@@ -66,6 +66,7 @@ export interface RecognizeCommandDependencies {
   /** 注入点：直接给出模型候选与默认选择，跳过 provider registry（测试/嵌入用）。 */
   modelResolution?: {
     candidates: readonly ImageModelCandidate[];
+    configuredModelType?: ModelSelection;
     configuredCapability?: ModelSelection;
     configuredDefault?: ModelSelection;
   };
@@ -140,15 +141,20 @@ export async function runRecognizeCommand(
   });
 
   try {
-    // 模型选择失败（没有视觉模型、`--model` 串非法）是用户可自行修正的输入问题，
-    // 与 scope 错误同级：就地报错并返回 1，而不是把裸异常抛给顶层兜底。
+    // 模型选择失败（没有视觉模型、`--model` 串非法、`--model-type` 指向不存在的类型）
+    // 是用户可自行修正的输入问题，与 scope 错误同级：就地报错并返回 1，
+    // 而不是把裸异常抛给顶层兜底。
     let selection: ModelSelection;
     try {
+      if (runtime?.modelTypeError) throw new Error(runtime.modelTypeError);
+      const configuredModelType =
+        deps.modelResolution?.configuredModelType ?? runtime?.configuredModelType;
       const configuredCapability =
         deps.modelResolution?.configuredCapability ?? runtime?.configuredCapability;
       selection = pickRecognizeModelSelection({
         ...(cmdOptions.model === undefined ? {} : { explicit: cmdOptions.model }),
         candidates: deps.modelResolution?.candidates ?? runtime?.candidates ?? [],
+        ...(configuredModelType ? { configuredModelType } : {}),
         ...(configuredCapability ? { configuredCapability } : {}),
         ...(deps.modelResolution?.configuredDefault ?? runtime?.configuredDefault
           ? { configuredDefault: (deps.modelResolution?.configuredDefault ?? runtime?.configuredDefault)! }

@@ -85,6 +85,12 @@ export type SlashCommand =
     }
   | {
       args: string;
+      name: "model-type";
+      rawName: string;
+      type: "known";
+    }
+  | {
+      args: string;
       name: "new";
       rawName: string;
       type: "known";

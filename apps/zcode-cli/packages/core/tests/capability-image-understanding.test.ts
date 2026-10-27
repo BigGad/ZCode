@@ -4,7 +4,7 @@ import { resolveTurnAttachments } from "../src/runtime/helpers/attachments.js";
 import type { ImageDescriptionPort } from "../src/runtime/types.js";
 
 /**
- * 能力模型代主模型理解图片（capability-model-selection.md §5）。
+ * 能力模型代主模型理解图片（model-selections.md §5）。
  *
  * 委派触发条件只有一条：主模型**显式**不支持图片（`supportsImage === false`）。
  * 能力未知（undefined）不委派，能力模型缺席或失败都保留原 image block。

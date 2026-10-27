@@ -9,6 +9,7 @@ import { createCommandCenter, parseSlashCommand } from "./command-center.js";
 import type { CommandCenterApp } from "./command-center.js";
 import { resolveDisplayLocale } from "./locale.js";
 import { createCliHeadlessBrowserRuntime } from "./headless-browser.js";
+import { listModelTypeOptions, resolveRequestedModelType } from "./model-type.js";
 // 复用防御式 runtime 读取：subscribeEvents 不在 app 的静态类型面上，
 // 两处各写一份「怎么把它读出来」就会在方法改名时只修好一处。
 import { readRuntimeEventSubscriber } from "./runtime-event-subscriber.js";
@@ -62,6 +63,7 @@ export function createTuiSubmitPrompt(
   browserUse?: GlobalOptions["browserUse"],
   browserExecutable?: GlobalOptions["browserExecutable"],
   workflowMode: DynamicWorkflowMode = DEFAULT_CLI_WORKFLOW_MODE,
+  modelType?: GlobalOptions["modelType"],
 ): TuiPromptHandler {
   let app: Awaited<ReturnType<NonNullable<RunDependencies["createZCodeApp"]>>> | undefined;
   let activeUiLocale = uiLocale;
@@ -138,7 +140,7 @@ export function createTuiSubmitPrompt(
     if (closeHandlerPromise) throw new Error("TUI prompt handler is closed");
     const {
       appEnv,
-      configuredCapabilityModelSelections,
+      configuredModelSelections,
       configuredDefaultModelSelection,
       createAppFactory,
       providerRegistryRuntime,
@@ -147,6 +149,17 @@ export function createTuiSubmitPrompt(
     } = await prepareTuiAppRuntime(deps, version, request, processRuntime);
     const providerEndpointRoutingPort = processRuntime.providerEndpointRoutingPort;
     const browserRuntime = createCliHeadlessBrowserRuntime({ browserExecutable, browserUse }, deps);
+    // --model-type：TUI 打开时的初始模型就是点名的那个类型（model-selections.md §6）。
+    // 点名了但解析不出来 → 抛给入口层，退出码 1，不打开 TUI。
+    // 没点名就不去读 Registry 视图：这条路径与模型选择无关。
+    const modelTypeSelection = modelType
+      ? resolveRequestedModelType({
+          name: modelType,
+          configured: configuredModelSelections,
+          registry: providerRegistryRuntime.runtime.registryService.getView(),
+        })
+      : {};
+    if (modelTypeSelection.error) throw new Error(modelTypeSelection.error);
     let createdApp: Awaited<ReturnType<NonNullable<RunDependencies["createZCodeApp"]>>>;
     try {
       createdApp = await createAppFactory({
@@ -156,9 +169,7 @@ export function createTuiSubmitPrompt(
         ...(providerEndpointRoutingPort ? { providerEndpointRoutingPort } : {}),
         providerRegistry: providerRegistryRuntime.runtime.registryService,
         configuredDefaultModelSelection,
-        ...(configuredCapabilityModelSelections
-          ? { configuredCapabilityModelSelections }
-          : {}),
+        ...(configuredModelSelections ? { configuredModelSelections } : {}),
         ...(providerRegistryRuntime.providerRuntimeHeadersPort
           ? {
               providerRuntimeHeadersPort: providerRegistryRuntime.providerRuntimeHeadersPort,
@@ -174,6 +185,10 @@ export function createTuiSubmitPrompt(
           modelStreaming: "on",
           titleGeneration: TUI_TITLE_GENERATION_CONFIG,
           workingDirectory,
+          // 点名的类型优先于 defaultModelSelection。
+          ...(modelTypeSelection.selection
+            ? { modelSelection: modelTypeSelection.selection }
+            : {}),
         },
         permissionBroker,
         sessionId,
@@ -290,6 +305,17 @@ export function createTuiSubmitPrompt(
         throw new Error("Default model configuration storage is unavailable.");
       }
       await runtime.modelSelectionConfigRepository.saveConfiguredDefault(selection);
+    },
+    listModelTypes: async () => {
+      const runtime = await processRuntime.providerRegistryRuntimePromise;
+      if (!runtime) return [];
+      const configured = runtime.modelSelectionConfigRepository
+        ? await runtime.modelSelectionConfigRepository.readModelSelections()
+        : runtime.configuredModelSelections;
+      return listModelTypeOptions({
+        configured,
+        registry: runtime.runtime.registryService.getView(),
+      });
     },
     logout: () => logoutForTui(deps),
     setLocale: async (locale) => {

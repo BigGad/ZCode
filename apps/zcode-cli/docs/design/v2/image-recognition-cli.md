@@ -95,18 +95,19 @@ zcode recognize ./photos --output-format stream-json --max-concurrency 8 > resul
 
 ## 4. Model Selection
 
-`recognize-model.ts` 四级优先，全部可解释：
+`recognize-model.ts` 五级优先，全部可解释：
 
 1. `--model <providerId>/<modelId>[$reasoningLevel]` —— 直接走 `parseModelPickerValue`；解析失败（缺 `/`、空 id）在 `pickRecognizeModelSelection` 里原样上抛（不吞成兜底选择），由命令层转成 stderr 一行 + exit 1。
-2. 能力模型配置 `capabilityModelSelections.image`（`registryRuntime.configuredCapabilityModelSelections.image`，见 [capability-model-selection.md](./capability-model-selection.md)）**且**它支持图像输入。
-3. 会话已配置的默认选择（`registryRuntime.configuredDefaultModelSelection`）**且**它支持图像输入。
-4. provider registry 快照里第一个 `supportsImage: true` 的模型。
+2. `--model-type <名字>` —— 命名模型类型（见 [model-selections.md](./model-selections.md) §6）**且**它支持图像输入。
+3. 能力键 `image` 的类型（`registryRuntime.configuredModelSelections.image`）**且**它支持图像输入。
+4. 会话已配置的默认选择（`registryRuntime.configuredDefaultModelSelection`）**且**它支持图像输入。
+5. provider registry 快照里第一个 `supportsImage: true` 的模型。
 
-第 2 级是 opt-in：只有用户在 Personal Provider Config 里显式配了能力模型才会改变行为；配置里写错模型 id（不在候选集里、或不支持图像）时不委派，直接落到下一级。
+第 2、3 级是 opt-in：只有用户在 Personal Provider Config 里显式配了才改变行为；配置里写错模型 id（不在候选集里、或不支持图像）时不委派，直接落到下一级。
 
 **不硬编码**模型 id：候选集由 `registryService.getSnapshot()` 的解析结果展平而来，能力位取 `model.config.properties?.inputFormat?.supportsImage`（规则文件是 match/overlay 的输入，只有解析结果才是某个具体模型的能力）。内置模型表变化时选择自动跟着变。
 
-四级都挑不出来时抛 `NO_VISION_MODEL_MESSAGE`（`No image-capable model found. Pass --model <providerId>/<modelId> explicitly.`），由 `recognize-command.ts` 就地捕获、写 stderr 并返回 exit 1 —— 与 scope 错误同级，不把裸异常抛给顶层兜底。
+五级都挑不出来时抛 `NO_VISION_MODEL_MESSAGE`（`No image-capable model found. Pass --model <providerId>/<modelId> explicitly.`），由 `recognize-command.ts` 就地捕获、写 stderr 并返回 exit 1 —— 与 scope 错误同级，不把裸异常抛给顶层兜底。
 
 子代理 dispatch 时通过 `SubagentRunOptions.modelOverride: { selection, background: "deny" }` 透传；`background: "deny"` 是必填位，保证单次执行的模型不脱离父 loop 生命周期。
 

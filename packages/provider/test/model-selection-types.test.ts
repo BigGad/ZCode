@@ -3,15 +3,15 @@ import {
   ModelConfig,
   ModelOptionSpecsConfig,
   ModelPropertiesConfig,
-  resolveCapabilityModelSelection,
-  resolveConfiguredCapabilityModelSelections,
+  resolveCapabilityModelSelections,
+  resolveModelTypeSelection,
   type Provider,
   type ProviderRegistryView,
 } from "../src/index.js";
 import { createApiKeyProviderConfig } from "./provider-config-fixtures.js";
 
 /**
- * 能力模型解析（capability-model-selection.md §4）。
+ * 命名模型类型解析（model-selections.md §4）。
  *
  * 能力位取**解析后**的 `properties.inputFormat`，所以这里的 fixture 直接给
  * 解析结果，不走规则文件。
@@ -63,23 +63,23 @@ function registryView(providers: readonly Provider[]): ProviderRegistryView {
   return { revision: 1, providers };
 }
 
-describe("能力模型解析", () => {
-  const registry = registryView([
-    provider({ providerId: "vision", modelId: "vision-model", supportsImage: true }),
-    provider({ providerId: "text-only", modelId: "text-model", supportsImage: false }),
-  ]);
+const registry = registryView([
+  provider({ providerId: "vision", modelId: "vision-model", supportsImage: true }),
+  provider({ providerId: "text-only", modelId: "text-model", supportsImage: false }),
+]);
 
-  it("未配置能力模型时给出 capability-not-configured", () => {
-    expect(resolveCapabilityModelSelection({ capability: "image", registry })).toEqual({
-      issue: "capability-not-configured",
+describe("命名模型类型解析", () => {
+  it("类型名不存在时给出 model-type-not-configured", () => {
+    expect(resolveModelTypeSelection({ name: "fast", registry })).toEqual({
+      issue: "model-type-not-configured",
     });
   });
 
   it("provider 不存在时给出 provider-not-found", () => {
     expect(
-      resolveCapabilityModelSelection({
-        capability: "image",
-        configured: { image: { providerId: "missing", modelId: "vision-model" } },
+      resolveModelTypeSelection({
+        name: "fast",
+        configured: { fast: { providerId: "missing", modelId: "vision-model" } },
         registry,
       }),
     ).toEqual({ issue: "provider-not-found" });
@@ -87,46 +87,19 @@ describe("能力模型解析", () => {
 
   it("model 不存在时给出 model-not-found", () => {
     expect(
-      resolveCapabilityModelSelection({
-        capability: "image",
-        configured: { image: { providerId: "vision", modelId: "missing" } },
+      resolveModelTypeSelection({
+        name: "fast",
+        configured: { fast: { providerId: "vision", modelId: "missing" } },
         registry,
       }),
     ).toEqual({ issue: "model-not-found" });
   });
 
-  it("模型不支持图片时给出 capability-not-supported", () => {
-    expect(
-      resolveCapabilityModelSelection({
-        capability: "image",
-        configured: { image: { providerId: "text-only", modelId: "text-model" } },
-        registry,
-      }),
-    ).toEqual({ issue: "capability-not-supported" });
-  });
-
   it("解析成功时返回可执行的选择（档位已补齐）", () => {
     expect(
-      resolveCapabilityModelSelection({
-        capability: "image",
-        configured: { image: { providerId: "vision", modelId: "vision-model" } },
-        registry,
-      }),
-    ).toEqual({
-      selection: {
-        providerId: "vision",
-        modelId: "vision-model",
-        options: { reasoningLevel: "low" },
-      },
-    });
-  });
-
-  it("补齐推理档位：缺失时用模型最低公开档位", () => {
-    // Model Factory 只接受完整执行选择，缺档位会抛 "Reasoning level is required"。
-    expect(
-      resolveCapabilityModelSelection({
-        capability: "image",
-        configured: { image: { providerId: "vision", modelId: "vision-model" } },
+      resolveModelTypeSelection({
+        name: "fast",
+        configured: { fast: { providerId: "vision", modelId: "vision-model" } },
         registry,
       }),
     ).toEqual({
@@ -140,10 +113,10 @@ describe("能力模型解析", () => {
 
   it("补齐推理档位：配置里显式声明且模型支持时保留", () => {
     expect(
-      resolveCapabilityModelSelection({
-        capability: "image",
+      resolveModelTypeSelection({
+        name: "fast",
         configured: {
-          image: {
+          fast: {
             providerId: "vision",
             modelId: "vision-model",
             options: { reasoningLevel: "high" },
@@ -162,10 +135,10 @@ describe("能力模型解析", () => {
 
   it("补齐推理档位：配置里的档位模型不支持时退回最低公开档位", () => {
     expect(
-      resolveCapabilityModelSelection({
-        capability: "image",
+      resolveModelTypeSelection({
+        name: "fast",
         configured: {
-          image: {
+          fast: {
             providerId: "vision",
             modelId: "vision-model",
             options: { reasoningLevel: "unsupported" },
@@ -181,16 +154,27 @@ describe("能力模型解析", () => {
       },
     });
   });
+
+  it("人点名的类型不校验能力：文本模型也可以被点名", () => {
+    expect(
+      resolveModelTypeSelection({
+        name: "fast",
+        configured: { fast: { providerId: "text-only", modelId: "text-model" } },
+        registry,
+      }),
+    ).toEqual({
+      selection: {
+        providerId: "text-only",
+        modelId: "text-model",
+        options: { reasoningLevel: "low" },
+      },
+    });
+  });
 });
 
-describe("整份能力模型配置解析", () => {
-  const registry = registryView([
-    provider({ providerId: "vision", modelId: "vision-model", supportsImage: true }),
-    provider({ providerId: "text-only", modelId: "text-model", supportsImage: false }),
-  ]);
-
+describe("能力键的模型选择解析", () => {
   it("解析失败的能力不进入结果，原因码单独上报", () => {
-    const resolved = resolveConfiguredCapabilityModelSelections({
+    const resolved = resolveCapabilityModelSelections({
       configured: { image: { providerId: "text-only", modelId: "text-model" } },
       registry,
     });
@@ -199,7 +183,7 @@ describe("整份能力模型配置解析", () => {
   });
 
   it("解析成功的能力进入结果", () => {
-    const resolved = resolveConfiguredCapabilityModelSelections({
+    const resolved = resolveCapabilityModelSelections({
       configured: { image: { providerId: "vision", modelId: "vision-model" } },
       registry,
     });
@@ -213,8 +197,8 @@ describe("整份能力模型配置解析", () => {
     expect(resolved.issues).toEqual([]);
   });
 
-  it("未知能力键保留在配置里但不被消费，也不报错", () => {
-    const resolved = resolveConfiguredCapabilityModelSelections({
+  it("未知类型名保留在配置里但不被消费，也不报错", () => {
+    const resolved = resolveCapabilityModelSelections({
       configured: { audio: { providerId: "vision", modelId: "vision-model" } },
       registry,
     });
@@ -223,7 +207,7 @@ describe("整份能力模型配置解析", () => {
   });
 
   it("没有配置时是空结果，不是错误", () => {
-    const resolved = resolveConfiguredCapabilityModelSelections({ registry });
+    const resolved = resolveCapabilityModelSelections({ registry });
     expect(resolved.selections).toEqual({});
     expect(resolved.issues).toEqual([]);
   });

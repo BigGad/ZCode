@@ -473,6 +473,68 @@ test("能力模型选择优先于默认选择，--model 仍最高", async () => 
   }
 });
 
+test("--model-type 优先于能力类型，--model 仍最高", async () => {
+  const dir = await fixtureFolder({ "01.jpg": "a" });
+  const typeCandidate: ImageModelCandidate = {
+    providerId: "type-provider",
+    modelId: "type-vision",
+    supportsImage: true,
+  };
+  const capabilityCandidate: ImageModelCandidate = {
+    providerId: "capability-provider",
+    modelId: "capability-vision",
+    supportsImage: true,
+  };
+  try {
+    const named = context();
+    await runRecognizeCommand(
+      named.ctx,
+      { ...globalOptions, json: true },
+      { folder: dir },
+      deps({
+        modelResolution: {
+          candidates: [IMAGE_CANDIDATE, typeCandidate, capabilityCandidate],
+          configuredModelType: {
+            providerId: typeCandidate.providerId,
+            modelId: typeCandidate.modelId,
+          },
+          configuredCapability: {
+            providerId: capabilityCandidate.providerId,
+            modelId: capabilityCandidate.modelId,
+          },
+        },
+      }),
+    );
+    assert.equal(
+      (JSON.parse(named.stdout.output()) as { plan: { model: string } }).plan.model,
+      "type-provider/type-vision",
+    );
+
+    // --model 仍高于 --model-type。
+    const explicit = context();
+    await runRecognizeCommand(
+      explicit.ctx,
+      { ...globalOptions, json: true },
+      { folder: dir, model: "other-provider/vision-9" },
+      deps({
+        modelResolution: {
+          candidates: [IMAGE_CANDIDATE, typeCandidate],
+          configuredModelType: {
+            providerId: typeCandidate.providerId,
+            modelId: typeCandidate.modelId,
+          },
+        },
+      }),
+    );
+    assert.equal(
+      (JSON.parse(explicit.stdout.output()) as { plan: { model: string } }).plan.model,
+      "other-provider/vision-9",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 function event(
   type: SessionEvent["type"],
   sessionId: string,

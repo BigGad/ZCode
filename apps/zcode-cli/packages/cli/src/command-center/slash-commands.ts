@@ -211,6 +211,16 @@ export function parseSlashCommand(input: string): SlashCommand | null {
     };
   }
 
+  // `/model-type <名字>`：按命名模型类型切模型（model-selections.md §6）。
+  if (rawName === "model-type") {
+    return {
+      args,
+      name: "model-type",
+      rawName,
+      type: "known",
+    };
+  }
+
   if (rawName === "goal" || rawName === "target") {
     return {
       args,

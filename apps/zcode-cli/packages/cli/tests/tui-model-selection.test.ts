@@ -12,6 +12,7 @@ import {
 import { modelSelectionSchema, type ModelSelection, type ZCodeModelOption } from "@zcode/shared";
 import { createCommandCenter, type CommandCenterApp } from "../src/command-center.js";
 import { handleModelCommand } from "../src/command-center/handlers/model.js";
+import { handleModelTypeCommand } from "../src/command-center/handlers/model-type.js";
 import { createTuiModelAvailabilityChecker } from "../src/tui-login-state.js";
 import { readTuiSessionMetadata } from "../src/tui-prompt-handler-queries.js";
 import { filterModelOptions, toPromptInput } from "../../tui/src/app-input.js";
@@ -107,6 +108,16 @@ function fixture(initial?: ModelSelection) {
     getApp,
     resumeApp: getApp,
     hasSelectableModels: createTuiModelAvailabilityChecker(getApp),
+    listModelTypes: async () => [
+      {
+        name: "fast",
+        selection: {
+          providerId: model().ref.providerId,
+          modelId: model().ref.modelId,
+          options: { reasoningLevel: "low" },
+        },
+      },
+    ],
     saveDefaultModelSelection: async (selection: ModelSelection) => {
       defaultWrites.push(selection);
     },
@@ -211,6 +222,31 @@ test("invalid reasoning and removed models fail before changing selection", asyn
   assert.match(removed.response, /not available/);
   assert.equal(f.writes.length, 0);
   assert.equal(f.defaultWrites.length, 0);
+});
+
+test("/model-type 切到命名类型并保存为默认选择", async () => {
+  const f = fixture();
+  const result = await handleModelTypeCommand("fast", f.deps);
+  assert.match(result.response, /fast/);
+  assert.deepEqual(f.writes, [
+    { ...model().ref, options: { reasoningLevel: "low" } },
+  ]);
+  assert.deepEqual(f.defaultWrites, f.writes);
+});
+
+test("/model-type 未知类型只给提示，不改选择、不退出", async () => {
+  const f = fixture();
+  const result = await handleModelTypeCommand("nope", f.deps);
+  assert.match(result.response, /Unknown model type: nope/);
+  assert.equal(f.writes.length, 0);
+  assert.equal(f.defaultWrites.length, 0);
+});
+
+test("/model-type 不带参数时列出可用类型", async () => {
+  const f = fixture();
+  const result = await handleModelTypeCommand("", f.deps);
+  assert.match(result.response, /fast/);
+  assert.equal(f.writes.length, 0);
 });
 
 test("effort changes persist the same literal model identity and its new reasoning level", async () => {
@@ -399,7 +435,7 @@ test("active-turn model picks use the same configuration command instead of beco
       runtime: { registryService: {} },
       modelSelectionConfigRepository: {
         read: async () => undefined,
-        readCapabilitySelections: async () => undefined,
+        readModelSelections: async () => undefined,
         saveConfiguredDefault: f.deps.saveDefaultModelSelection,
       },
       dispose() {},

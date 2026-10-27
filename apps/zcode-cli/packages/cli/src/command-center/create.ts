@@ -12,6 +12,7 @@ import { handleLocaleCommand } from "./handlers/locale.js";
 import { handleMcpCommand } from "./handlers/mcp.js";
 import { handleModeCommand } from "./handlers/mode.js";
 import { handleModelCommand } from "./handlers/model.js";
+import { handleModelTypeCommand } from "./handlers/model-type.js";
 import { handlePluginsCommand } from "./handlers/plugins.js";
 import { handleSkillListCommand } from "./handlers/skill.js";
 import { handleTargetCommand } from "./handlers/goal.js";
@@ -297,6 +298,10 @@ export function createCommandCenter(deps: CommandCenterDeps): TuiSubmitPrompt {
 
       if (command.name === "model") {
         return handleModelCommand(command.args, deps, promptInput.modelSelection);
+      }
+
+      if (command.name === "model-type") {
+        return handleModelTypeCommand(command.args, deps);
       }
 
       if (command.name === "goal") {

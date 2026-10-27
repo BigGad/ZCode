@@ -17,7 +17,7 @@ export const modelSelectionSchema = z
 export type ModelSelection = z.infer<typeof modelSelectionSchema>;
 
 /**
- * 能力键：按输入模态划分的**独立**模型选择（capability-model-selection.md）。
+ * 能力键：按输入模态划分的**独立**模型选择（model-selections.md）。
  *
  * 主 LLM 由 `defaultModelSelection` 决定；能力键让某个能力（当前只有图片理解）
  * 走另一个 provider/model。二者互不影响：主模型自己支持该能力时，能力模型不被调用。
@@ -27,21 +27,24 @@ export const MODEL_CAPABILITIES = ["image"] as const;
 export type ModelCapability = (typeof MODEL_CAPABILITIES)[number];
 
 /**
- * 能力 → 模型选择。
+ * 模型类型名 → 模型选择。
  *
- * 键是开放的字符串：新增能力不需要改文件 schema，未知键保留在用户配置里但没有消费方，
+ * 一张表同时服务两类消费方：人按类型名点名（`--model-type fast`），以及运行时按能力键
+ * 自动取用（`modelSelections.image`）。
+ *
+ * 键是开放的字符串：新增类型不需要改文件 schema，未知键保留在用户配置里但没有消费方，
  * 不会因为拼错一个键就让整份 Personal Provider Config 读取失败。
  */
-export const capabilityModelSelectionsSchema = z.record(z.string().min(1), modelSelectionSchema);
+export const modelSelectionsSchema = z.record(z.string().min(1), modelSelectionSchema);
 
-export type CapabilityModelSelections = Readonly<Record<string, ModelSelection>>;
+export type ModelSelections = Readonly<Record<string, ModelSelection>>;
 
-/** 读取某个能力的选择；未知能力键返回 undefined（不是错误）。 */
-export function readCapabilityModelSelection(
-  selections: CapabilityModelSelections | undefined,
-  capability: ModelCapability,
+/** 读取某个类型的选择；未知类型名返回 undefined（不是错误）。 */
+export function readModelSelection(
+  selections: ModelSelections | undefined,
+  name: string,
 ): ModelSelection | undefined {
-  return selections?.[capability];
+  return selections?.[name];
 }
 
 /** 公共解析结果。页面可以展示不完整选择，执行入口必须同时检查 selectionIssue。 */

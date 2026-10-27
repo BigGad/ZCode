@@ -11,7 +11,7 @@ import { resolveAppRuntimeConfig } from "../src/app/runtime-config.js";
 import { createApiKeyProviderConfig } from "./provider-config-fixtures.js";
 
 /**
- * 能力模型选择进入 runtimeConfig（capability-model-selection.md §2/§4）。
+ * 能力模型选择进入 runtimeConfig（model-selections.md §2/§4）。
  *
  * runtimeConfig 里只放**解析成功**的能力选择；解析失败的原因码单独上报，
  * 调用方按「没有能力模型」降级，不影响主链路。
@@ -62,7 +62,7 @@ function provider(input: {
 }
 
 function resolve(input: {
-  configuredCapabilityModelSelections?: Record<string, { providerId: string; modelId: string }>;
+  configuredModelSelections?: Record<string, { providerId: string; modelId: string }>;
 }) {
   return resolveAppRuntimeConfig({
     cliStorageRoot: "/tmp/zcode-cli",
@@ -72,8 +72,8 @@ function resolve(input: {
         provider({ providerId: "vision", modelId: "vision-model", supportsImage: true }),
         provider({ providerId: "text-only", modelId: "text-model", supportsImage: false }),
       ]),
-      ...(input.configuredCapabilityModelSelections
-        ? { configuredCapabilityModelSelections: input.configuredCapabilityModelSelections }
+      ...(input.configuredModelSelections
+        ? { configuredModelSelections: input.configuredModelSelections }
         : {}),
     },
     subagentOutputRootDir: "/tmp/zcode-cli/agents",
@@ -85,7 +85,7 @@ function resolve(input: {
 describe("runtimeConfig 的能力模型选择", () => {
   it("解析成功的能力选择进入 runtimeConfig（档位已补齐）", () => {
     const resolved = resolve({
-      configuredCapabilityModelSelections: {
+      configuredModelSelections: {
         image: { providerId: "vision", modelId: "vision-model" },
       },
     });
@@ -102,7 +102,7 @@ describe("runtimeConfig 的能力模型选择", () => {
 
   it("解析失败的能力不进入 runtimeConfig，并给出原因码", () => {
     const resolved = resolve({
-      configuredCapabilityModelSelections: {
+      configuredModelSelections: {
         image: { providerId: "text-only", modelId: "text-model" },
       },
     });
@@ -115,7 +115,7 @@ describe("runtimeConfig 的能力模型选择", () => {
 
   it("provider 不存在时给出 provider-not-found", () => {
     const resolved = resolve({
-      configuredCapabilityModelSelections: {
+      configuredModelSelections: {
         image: { providerId: "missing", modelId: "vision-model" },
       },
     });

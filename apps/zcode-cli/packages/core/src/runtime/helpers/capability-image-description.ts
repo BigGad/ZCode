@@ -2,7 +2,7 @@ import type { ModelMessageContentBlock } from "../deps.js";
 import type { ImageDescriptionPort, ResolvedTurnAttachment } from "../types.js";
 
 /**
- * 主模型不支持图片时，用能力模型把图片读成文字（capability-model-selection.md §5）。
+ * 主模型不支持图片时，用能力模型把图片读成文字（model-selections.md §5）。
  *
  * 触发条件全部收紧：模型能力必须**显式**为 `supportsImage === false`（`undefined` 是未知，
  * 不委派），且必须配置了能力模型端口。描述失败返回 undefined —— 原 image block 原样保留，
