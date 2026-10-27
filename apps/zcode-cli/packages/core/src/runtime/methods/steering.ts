@@ -40,6 +40,7 @@ import {
   previewInput,
 } from "../helpers/index.js";
 import { resolveTurnAttachments } from "../helpers/attachments.js";
+import { resolveCapabilityImageDescriptionPort } from "./capability-image-understanding.js";
 import { emitTurnAttachmentPageCounts } from "./turn-attachment-page-counts.js";
 import type {
   ActiveTurnKind,
@@ -1213,6 +1214,10 @@ async function drainPendingInputUnlocked(
     const resolvedAttachments = await resolveTurnAttachments(pendingInput.attachments, {
       artifactStore: this.artifactStore,
       fileSystemPort: this.fileSystemPort,
+      // 主模型不支持图片时，用能力模型把图片读成文字（capability-model-selection.md §5）。
+      imageDescription: resolveCapabilityImageDescriptionPort(this, {
+        traceContext: drainTraceContext,
+      }),
       imageProcessorPort: this.imageProcessorPort,
       modelInputFormat: options.modelInputFormat,
       pdfDocumentPort: this.pdfDocumentPort,

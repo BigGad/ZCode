@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { modelSelectionSchema } from "@zcode/shared/model-selection";
+import {
+  capabilityModelSelectionsSchema,
+  modelSelectionSchema,
+} from "@zcode/shared/model-selection";
 import { completeModelConfigDataSchema, modelConfigDataSchema } from "@zcode/shared/model-config";
 import {
   parsePersonalModelConfigRules,
@@ -24,6 +27,9 @@ const storedProviderConfigSchema = z
         providerConfigRules: z.unknown(),
         modelConfigRules: z.unknown(),
         defaultModelSelection: modelSelectionSchema.optional(),
+        // 能力 → 模型选择（capability-model-selection.md）。键是开放的：未知能力键保留在
+        // 用户文件里但没有消费方，不能因为拼错一个键就让整份配置读取失败。
+        capabilityModelSelections: capabilityModelSelectionsSchema.optional(),
       })
       .strict(),
   })
@@ -78,6 +84,9 @@ export function decodeProviderConfigFile(input: unknown): ProviderConfigLayerUpd
     ...(parsed.config.defaultModelSelection === undefined
       ? {}
       : { defaultModelSelection: parsed.config.defaultModelSelection }),
+    ...(parsed.config.capabilityModelSelections === undefined
+      ? {}
+      : { capabilityModelSelections: parsed.config.capabilityModelSelections }),
   });
 }
 
@@ -119,6 +128,9 @@ export function encodeProviderConfigFile(update: ProviderConfigLayerUpdate) {
       ...(update.defaultModelSelection === undefined
         ? {}
         : { defaultModelSelection: update.defaultModelSelection }),
+      ...(update.capabilityModelSelections === undefined
+        ? {}
+        : { capabilityModelSelections: update.capabilityModelSelections }),
     },
   };
 }

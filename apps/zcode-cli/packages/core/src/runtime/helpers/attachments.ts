@@ -16,8 +16,9 @@ import type {
   WorkspaceResourceIndexPort,
 } from "../deps.js";
 import { readTextFileForModel } from "../../tool/handlers/read-text.js";
-import type { ResolvedTurnAttachment } from "../types.js";
+import type { ImageDescriptionPort, ResolvedTurnAttachment } from "../types.js";
 import { readInlineAttachmentContent } from "./attachment-artifacts.js";
+import { applyCapabilityImageDescription } from "./capability-image-description.js";
 import { parseDataUrlHeader } from "./attachment-data-url.js";
 import { resolveInlineMediaAttachment } from "./inline-media-resolver.js";
 import { resolveLocalMediaAttachment } from "./local-media-resolver.js";
@@ -37,6 +38,13 @@ type ResolveAttachmentOptions = {
   fileSystemPort?: FileSystemPort;
   imageProcessorPort?: ImageProcessorPort;
   modelInputFormat?: ModelInputFormat;
+  /**
+   * 图片理解端口（capability-model-selection.md §5）。
+   *
+   * 只有主模型**显式不支持图片**（`modelInputFormat.supportsImage === false`）时才调用；
+   * 端口缺席或返回空，都保留原 image block，走既有 omitted-media 降级。
+   */
+  imageDescription?: ImageDescriptionPort;
   pdfDocumentPort?: PdfDocumentPort;
   sessionId?: SessionId;
   traceContext: TraceContext;
@@ -100,6 +108,15 @@ export async function resolveTurnAttachments(
 }
 
 async function resolveTurnAttachment(
+  attachment: TurnAttachment,
+  index: number,
+  options: ResolveAttachmentOptions,
+): Promise<ResolvedTurnAttachment> {
+  const resolved = await resolveTurnAttachmentContent(attachment, index, options);
+  return await applyCapabilityImageDescription(resolved, options);
+}
+
+async function resolveTurnAttachmentContent(
   attachment: TurnAttachment,
   index: number,
   options: ResolveAttachmentOptions,

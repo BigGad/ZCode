@@ -1,6 +1,11 @@
 import type { ConfigResult } from "@zcode/adapters/config";
 import { GEN_UI_OUTPUT_ROOT_ENV } from "@zcode/shared/node";
-import { resolveInitialModelSelection, type ModelSelectionOptions } from "@zcode/provider";
+import {
+  resolveConfiguredCapabilityModelSelections,
+  resolveInitialModelSelection,
+  type CapabilityModelSelectionIssue,
+  type ModelSelectionOptions,
+} from "@zcode/provider";
 import { resolveBashTimeoutPolicy, type AgentProfile, type AgentRuntimeConfig } from "@zcode/core";
 import { type BuiltInSubagentModelSelectionOverrides } from "@zcode/shared";
 import {
@@ -25,6 +30,14 @@ interface ResolvedAppRuntimeConfig {
   configuredMcpServers: Record<string, McpServerConfig>;
   runtimeConfig: AgentRuntimeConfig;
   untrustedProjectMcpServers: Set<string>;
+  /**
+   * 能力模型解析失败项（capability-model-selection.md §7）。
+   * 能力模型不可用时按「没有能力模型」降级，不影响主链路；这里只负责上报原因。
+   */
+  capabilityModelSelectionIssues: ReadonlyArray<{
+    readonly capability: string;
+    readonly issue: CapabilityModelSelectionIssue;
+  }>;
 }
 
 interface ResolvedInitialRegistrySelection extends ResolvedRegistrySelection {
@@ -116,6 +129,14 @@ export function resolveAppRuntimeConfig(input: {
   );
   const runtimeBuiltInModelSelectionOverrides =
     options.runtimeConfig?.subagents?.builtInModelSelectionOverrides ?? {};
+  // 能力模型是**独立**于主模型的一条选择：这里按 Registry 事实校验一次，
+  // 解析失败的能力不进入 runtimeConfig（调用方按「没有能力模型」降级）。
+  const capabilityModelSelections = options.providerRegistry
+    ? resolveConfiguredCapabilityModelSelections({
+        configured: options.configuredCapabilityModelSelections,
+        registry: options.providerRegistry.getView(),
+      })
+    : { selections: {}, issues: [] };
   const runtimeConfig: AgentRuntimeConfig = {
     ...options.runtimeConfig,
     genUiOutputRoot: (options.env ?? process.env)[GEN_UI_OUTPUT_ROOT_ENV],
@@ -124,6 +145,7 @@ export function resolveAppRuntimeConfig(input: {
       resolveBashTimeoutPolicy(options.env ?? process.env),
     mode: options.runtimeConfig?.mode ?? persistedMode ?? configResult.config.permission.mode,
     modelSelection: initialModelSelection,
+    capabilityModelSelections: capabilityModelSelections.selections,
     // 仅接受显式传入的会话级工具面（ZCode Protocol session/create 或 CLI
     // --allowed-tools/--disallowed-tools）。不要从 config.permission.allowedTools
     // 回落：那个键的既有语义是“免审批清单”，把它投影到注册面会让老配置里
@@ -187,6 +209,7 @@ export function resolveAppRuntimeConfig(input: {
     },
   };
   return {
+    capabilityModelSelectionIssues: capabilityModelSelections.issues,
     configuredMcpServers,
     runtimeConfig,
     untrustedProjectMcpServers,
@@ -291,6 +314,11 @@ export function runtimeConfigLogContext(
     mode: runtimeConfig.mode,
     model: runtimeConfig.modelSelection
       ? `${runtimeConfig.modelSelection.providerId}/${runtimeConfig.modelSelection.modelId}`
+      : undefined,
+    // 生效的能力模型（capability-model-selection.md）：启动日志里能直接看出
+    // 「图片理解走的是哪个模型」，排查「配了能力模型却没生效」不用再翻配置。
+    capabilityModel: runtimeConfig.capabilityModelSelections?.image
+      ? `${runtimeConfig.capabilityModelSelections.image.providerId}/${runtimeConfig.capabilityModelSelections.image.modelId}`
       : undefined,
     runtimeFeatureBrowserUse: runtimeConfig.runtimeFeatures?.browserUse === true,
     runtimeFeatureNodeRepl: runtimeConfig.runtimeFeatures?.nodeRepl === true,

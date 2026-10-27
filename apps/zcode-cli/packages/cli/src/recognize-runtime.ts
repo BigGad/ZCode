@@ -1,5 +1,6 @@
 import { createRootTraceContext, type AgentOutput, type SessionId, type TraceId } from "@zcode/contracts";
 import { createDenyPermissionBroker } from "@zcode/core";
+import { resolveConfiguredCapabilityModelSelections } from "@zcode/provider";
 import type { ZCodeAppOptions } from "@zcode/bootstrap";
 import type { ModelSelection } from "@zcode/shared/model-selection";
 import type { GlobalOptions } from "@zcode/shared-types";
@@ -42,6 +43,8 @@ export function createRecognizePermissionBroker(): NonNullable<
 export interface RecognizeRuntime {
   app: Awaited<ReturnType<Awaited<ReturnType<typeof loadBootstrapModule>>["createZCodeApp"]>>;
   candidates: readonly ImageModelCandidate[];
+  /** 能力模型配置里的图片理解选择（capability-model-selection.md §6）。 */
+  configuredCapability?: ModelSelection;
   configuredDefault?: ModelSelection;
   dispose: () => Promise<void>;
 }
@@ -65,6 +68,12 @@ export async function createRecognizeRuntime(input: {
       permissionBroker: createRecognizePermissionBroker(),
       providerRegistry: registryRuntime.runtime.registryService,
       configuredDefaultModelSelection: registryRuntime.configuredDefaultModelSelection,
+      ...(registryRuntime.configuredCapabilityModelSelections
+        ? {
+            configuredCapabilityModelSelections:
+              registryRuntime.configuredCapabilityModelSelections,
+          }
+        : {}),
       ...(registryRuntime.providerRuntimeHeadersPort
         ? { providerRuntimeHeadersPort: registryRuntime.providerRuntimeHeadersPort }
         : {}),
@@ -81,11 +90,20 @@ export async function createRecognizeRuntime(input: {
       },
     });
     const snapshot = registryRuntime.runtime.registryService.getSnapshot();
+    // 能力模型要走 Registry 解析：既要确认模型真的支持图像，也要补齐可执行的推理档位
+    // （Model Factory 只接受完整选择，缺档位会直接报错）。
+    const capabilityModel = resolveConfiguredCapabilityModelSelections({
+      configured: registryRuntime.configuredCapabilityModelSelections,
+      registry: snapshot?.registry ?? { revision: 0, providers: [] },
+    });
     return {
       app,
       candidates: snapshot === null ? [] : collectImageModelCandidates(snapshot.registry.providers),
       ...(registryRuntime.configuredDefaultModelSelection
         ? { configuredDefault: registryRuntime.configuredDefaultModelSelection }
+        : {}),
+      ...(capabilityModel.selections.image
+        ? { configuredCapability: capabilityModel.selections.image }
         : {}),
       dispose: async () => {
         await app?.close?.().catch(() => undefined);

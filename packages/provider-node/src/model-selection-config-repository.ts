@@ -1,4 +1,5 @@
 import type { ModelSelection, PersonalProviderConfigRepository } from "@zcode/provider";
+import type { CapabilityModelSelections } from "@zcode/shared/model-selection";
 
 export interface NodeModelSelectionConfigRepositoryOptions {
   readonly personalRepository: PersonalProviderConfigRepository;
@@ -17,6 +18,15 @@ export class NodeModelSelectionConfigRepository {
   async read(): Promise<ModelSelection | undefined> {
     this.#assertNotDisposed();
     return (await this.#personal.read()).defaultModelSelection;
+  }
+
+  /**
+   * 能力模型选择同样来自 Personal 文件的另一个字段（capability-model-selection.md）。
+   * 与默认选择共用一份文件，因此也共用同一次读取的 IO 与锁。
+   */
+  async readCapabilitySelections(): Promise<CapabilityModelSelections | undefined> {
+    this.#assertNotDisposed();
+    return (await this.#personal.read()).capabilityModelSelections;
   }
 
   async saveConfiguredDefault(

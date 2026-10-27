@@ -138,6 +138,7 @@ export function createTuiSubmitPrompt(
     if (closeHandlerPromise) throw new Error("TUI prompt handler is closed");
     const {
       appEnv,
+      configuredCapabilityModelSelections,
       configuredDefaultModelSelection,
       createAppFactory,
       providerRegistryRuntime,
@@ -155,6 +156,9 @@ export function createTuiSubmitPrompt(
         ...(providerEndpointRoutingPort ? { providerEndpointRoutingPort } : {}),
         providerRegistry: providerRegistryRuntime.runtime.registryService,
         configuredDefaultModelSelection,
+        ...(configuredCapabilityModelSelections
+          ? { configuredCapabilityModelSelections }
+          : {}),
         ...(providerRegistryRuntime.providerRuntimeHeadersPort
           ? {
               providerRuntimeHeadersPort: providerRegistryRuntime.providerRuntimeHeadersPort,

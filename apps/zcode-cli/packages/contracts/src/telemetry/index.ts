@@ -12,6 +12,8 @@ export * from "./agent-execution.js";
 
 export const ModelApiOperation = {
   AgentStep: "agent_step",
+  /** 能力模型代主模型理解图片（capability-model-selection.md）。 */
+  CapabilityImageUnderstanding: "capability_image_understanding",
   ContextCompaction: "context_compaction",
   GoalTitle: "goal_title_generation",
   GoalVerification: "goal_completion_verification",

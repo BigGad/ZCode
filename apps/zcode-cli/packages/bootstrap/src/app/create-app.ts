@@ -260,24 +260,37 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     const persistedMode = options.runtimeConfig?.mode
       ? undefined
       : readProjectPermissionMode(localSettingStore, projectID);
-    let { configuredMcpServers, runtimeConfig, untrustedProjectMcpServers } =
-      resolveAppRuntimeConfig({
-        cliStorageRoot,
-        configResult,
-        options,
-        persistedMode,
-        pluginHooks: pluginOutcome.hooks,
-        pluginMcpServers: pluginOutcome.mcpServers,
-        builtInMcpServers,
-        pluginRuntimeFeatures,
-        builtInSubagentModelSelectionOverrides:
-          zcodeSubagentProfileOutcome.builtInModelSelectionOverrides,
-        subagentOutputRootDir: join(cliStorageRoot, "agents"),
-        subagentProfiles,
-        storageRoot,
-        workingDirectory,
-        workspaceIdentity: options.runtimeConfig?.memory?.workspaceIdentity,
+    let {
+      capabilityModelSelectionIssues,
+      configuredMcpServers,
+      runtimeConfig,
+      untrustedProjectMcpServers,
+    } = resolveAppRuntimeConfig({
+      cliStorageRoot,
+      configResult,
+      options,
+      persistedMode,
+      pluginHooks: pluginOutcome.hooks,
+      pluginMcpServers: pluginOutcome.mcpServers,
+      builtInMcpServers,
+      pluginRuntimeFeatures,
+      builtInSubagentModelSelectionOverrides:
+        zcodeSubagentProfileOutcome.builtInModelSelectionOverrides,
+      subagentOutputRootDir: join(cliStorageRoot, "agents"),
+      subagentProfiles,
+      storageRoot,
+      workingDirectory,
+      workspaceIdentity: options.runtimeConfig?.memory?.workspaceIdentity,
+    });
+    // 能力模型不可用只降级该能力，不影响主链路；但必须让用户看见原因，
+    // 否则「配了图片模型却仍然读不了图」没有任何线索。
+    for (const { capability, issue } of capabilityModelSelectionIssues) {
+      logger.warn("Capability model selection unresolved", {
+        capability,
+        event: "capability_model_selection.unresolved",
+        issue,
       });
+    }
     const browserControlPort = options.browserControlPort;
     if (
       browserControlPort &&

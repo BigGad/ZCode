@@ -7,7 +7,9 @@ import type {
   JsonSchema,
   AgentExecutionTelemetryPort,
   AgentTelemetryCausation,
+  AttachmentRef,
   BackgroundResultOriginMeta,
+  CapabilityModelSelections,
   ContextUsageBreakdownItem,
   CoordinatorResponsePort,
   ForkCommitBundle,
@@ -210,6 +212,11 @@ export interface AgentRuntimeConfig {
     modelSelection?: ModelSelection;
     timeoutMs?: number;
   };
+  /**
+   * 能力 → 模型选择（capability-model-selection.md）。主模型自己支持该能力时不使用；
+   * 只有主模型**显式不支持**且本轮存在该能力附件时，才用对应能力模型代为理解。
+   */
+  capabilityModelSelections?: CapabilityModelSelections;
   parentSessionId?: SessionId;
   taskType?: SessionTaskType;
   /**
@@ -810,6 +817,18 @@ export interface ResolvedTurnAttachment {
   source?: FilePartSource;
   url: string;
 }
+
+/**
+ * 图片理解端口（capability-model-selection.md §5）。
+ *
+ * 只在主模型**显式不支持图片**时调用：把图片交给能力模型，返回它的描述文本。
+ * 返回 undefined 表示「没能描述」——调用方保留原 image block，走既有 omitted-media 降级。
+ */
+export type ImageDescriptionPort = (input: {
+  readonly mediaType: string;
+  readonly dataUrl: string;
+  readonly source?: AttachmentRef;
+}) => Promise<string | undefined>;
 
 export interface PreparedImageData {
   dataUrl: string;

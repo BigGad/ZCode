@@ -1,4 +1,5 @@
 export * from "./account-provider-resolution.js";
+export * from "./capability-model-selection.js";
 export * from "./account-provider-service.js";
 export * from "./account-provider-state.js";
 export * from "./config-overlay.js";

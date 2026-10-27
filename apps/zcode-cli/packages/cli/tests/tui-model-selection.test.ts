@@ -399,6 +399,7 @@ test("active-turn model picks use the same configuration command instead of beco
       runtime: { registryService: {} },
       modelSelectionConfigRepository: {
         read: async () => undefined,
+        readCapabilitySelections: async () => undefined,
         saveConfiguredDefault: f.deps.saveDefaultModelSelection,
       },
       dispose() {},

@@ -58,6 +58,8 @@ describe("guide 行内 drain 的外层 FIFO 门", () => {
     const runtime = {
       activeTurn,
       appendEvent: vi.fn(async (event) => appendedEvents.push(event)),
+      // drain 路径会读 runtime.config 决定能力模型；这里没有能力模型配置，空 config 即可。
+      config: {},
       createEvent: vi.fn((_type, payload) => ({ payload })),
       getWorkspaceKey: () => undefined,
       messageHistory: { addEntries: vi.fn() },

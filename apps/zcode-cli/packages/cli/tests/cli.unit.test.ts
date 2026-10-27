@@ -601,11 +601,12 @@ test("borrows one process provider registry for a headless prompt and disposes i
     userConfigPath: "/tmp/zcode-legacy-cli.json",
     startProcessProviderRegistryRuntime: async (_env, options) => {
       runtimeStarts += 1;
-      assert.deepEqual(options, {
-        standalone: {
-          legacyCliUserConfigFilePath: "/tmp/zcode-legacy-cli.json",
-        },
-      });
+      // standalone 里还带 Built-in 刷新 reporter 回调，不能对整个 options 做 deepEqual：
+      // 断言会随回调增减而假失败。这里只断言本用例真正关心的旧配置路径透传。
+      assert.equal(
+        options?.standalone?.legacyCliUserConfigFilePath,
+        "/tmp/zcode-legacy-cli.json",
+      );
       return {
         accountSource: {} as never,
         dispose: () => {
@@ -618,6 +619,7 @@ test("borrows one process provider registry for a headless prompt and disposes i
             selectionRepositoryDisposals += 1;
           },
           read: async () => ({ providerId: "provider-a", modelId: "model-a" }),
+          readCapabilitySelections: async () => undefined,
         },
         providerRuntimeHeadersPort,
         snapshot: {} as never,
@@ -2123,6 +2125,7 @@ test("wires TUI model command into app server state", async () => {
         modelSelectionConfigRepository: {
           dispose: () => {},
           read: async () => undefined,
+          readCapabilitySelections: async () => undefined,
           saveConfiguredDefault: async (selection: ModelSelection) => {
             savedDefaults.push(selection);
           },
@@ -6272,11 +6275,11 @@ test("reuses one process provider registry across TUI app replacements", async (
     userConfigPath: "/tmp/zcode-legacy-tui.json",
     startProcessProviderRegistryRuntime: async (_env, options) => {
       runtimeStarts += 1;
-      assert.deepEqual(options, {
-        standalone: {
-          legacyCliUserConfigFilePath: "/tmp/zcode-legacy-tui.json",
-        },
-      });
+      // 同上：standalone 里还有刷新 reporter 回调，只断言本用例关心的路径透传。
+      assert.equal(
+        options?.standalone?.legacyCliUserConfigFilePath,
+        "/tmp/zcode-legacy-tui.json",
+      );
       return {
         accountSource: {} as never,
         dispose: () => {
@@ -6289,6 +6292,7 @@ test("reuses one process provider registry across TUI app replacements", async (
             selectionRepositoryDisposals += 1;
           },
           read: async () => ({ providerId: "provider-a", modelId: "model-a" }),
+          readCapabilitySelections: async () => undefined,
         },
         providerRuntimeHeadersPort,
         snapshot: {} as never,
@@ -6327,6 +6331,9 @@ test("reuses one process provider registry across TUI app replacements", async (
       } as never;
     },
     runTui: async (options) => {
+      // 真实 TUI 在首帧后通过 loadStartupOptions 创建初始 App；/new 之前的那个 App 由此产生，
+      // 少了这一步就只剩 /new 创建的那一个，「跨 App 替换复用同一份 Registry」就无从断言。
+      await loadTuiStartup(options);
       await options.submitPrompt("/new", {
         requestPermission: async () => ({
           decision: "deny",

@@ -3,12 +3,14 @@ import { parseModelPickerValue, type ModelSelection } from "@zcode/shared/model-
 /**
  * `zcode recognize` 的模型选择（image-recognition-cli.md「Model Selection」节）。
  *
- * 三级优先，全部可解释：
+ * 四级优先，全部可解释：
  *  1. `--model <providerId>/<modelId>[$reasoningLevel]`（Picker 串，复用 `parseModelPickerValue`）；
- *  2. 会话已配置的默认选择**且**它支持图像输入；
- *  3. provider registry 快照里第一个支持图像输入的模型。
+ *  2. 能力模型配置 `capabilityModelSelections.image`（capability-model-selection.md §6），
+ *     即用户显式声明的「图片理解用这个模型」；
+ *  3. 会话已配置的默认选择**且**它支持图像输入；
+ *  4. provider registry 快照里第一个支持图像输入的模型。
  *
- * 第 3 级不写字面量模型 id：能力位来自 registry 解析结果
+ * 第 4 级不写字面量模型 id：能力位来自 registry 解析结果
  * （`packages/provider/src/resolver.ts` 的 `ProviderModel.config.properties.inputFormat`），
  * 内置模型表变化时选择自动跟着变。都挑不出来时抛错——报「没有视觉模型」比伪造一个
  * 不存在的模型 id、让 provider 在请求期才失败更接近事实。
@@ -26,6 +28,7 @@ export const NO_VISION_MODEL_MESSAGE =
 
 export function pickRecognizeModelSelection(input: {
   explicit?: string;
+  configuredCapability?: ModelSelection;
   configuredDefault?: ModelSelection;
   candidates: readonly ImageModelCandidate[];
 }): ModelSelection {
@@ -33,6 +36,19 @@ export function pickRecognizeModelSelection(input: {
   if (explicit !== undefined && explicit.length > 0) {
     // Picker 串的解析错误（缺 `/`、空 id）原样上抛：这是用户输入问题，不该被兜底吞掉。
     return parseModelPickerValue(explicit);
+  }
+
+  // 能力模型必须真的存在且支持图像输入；配置里写错的模型 id 不能把识别带偏。
+  const configuredCapability = input.configuredCapability;
+  if (
+    configuredCapability !== undefined &&
+    candidateSupportsImage(
+      input.candidates,
+      configuredCapability.providerId,
+      configuredCapability.modelId,
+    )
+  ) {
+    return configuredCapability;
   }
 
   const configuredDefault = input.configuredDefault;

@@ -421,6 +421,58 @@ test("没有图像模型时 exit 1 并给出可操作提示", async () => {
   }
 });
 
+test("能力模型选择优先于默认选择，--model 仍最高", async () => {
+  const dir = await fixtureFolder({ "01.jpg": "a" });
+  const capabilityCandidate: ImageModelCandidate = {
+    providerId: "capability-provider",
+    modelId: "capability-vision",
+    supportsImage: true,
+  };
+  try {
+    const capability = context();
+    await runRecognizeCommand(
+      capability.ctx,
+      { ...globalOptions, json: true },
+      { folder: dir },
+      deps({
+        modelResolution: {
+          candidates: [IMAGE_CANDIDATE, capabilityCandidate],
+          configuredCapability: {
+            providerId: capabilityCandidate.providerId,
+            modelId: capabilityCandidate.modelId,
+          },
+          configuredDefault: { providerId: IMAGE_CANDIDATE.providerId, modelId: IMAGE_CANDIDATE.modelId },
+        },
+      }),
+    );
+    assert.equal(
+      (JSON.parse(capability.stdout.output()) as { plan: { model: string } }).plan.model,
+      "capability-provider/capability-vision",
+    );
+
+    // 能力模型不支持图片（或不在 registry 候选里）时不能让识别跑偏，退回默认选择。
+    const fallback = context();
+    await runRecognizeCommand(
+      fallback.ctx,
+      { ...globalOptions, json: true },
+      { folder: dir },
+      deps({
+        modelResolution: {
+          candidates: [IMAGE_CANDIDATE],
+          configuredCapability: { providerId: "capability-provider", modelId: "capability-vision" },
+          configuredDefault: { providerId: IMAGE_CANDIDATE.providerId, modelId: IMAGE_CANDIDATE.modelId },
+        },
+      }),
+    );
+    assert.equal(
+      (JSON.parse(fallback.stdout.output()) as { plan: { model: string } }).plan.model,
+      "test-provider/vision-1",
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 function event(
   type: SessionEvent["type"],
   sessionId: string,

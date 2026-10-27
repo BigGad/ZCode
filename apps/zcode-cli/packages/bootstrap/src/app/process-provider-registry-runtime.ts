@@ -155,6 +155,9 @@ export async function startProcessProviderRegistryRuntime(
     });
     try {
       const configuredDefaultModelSelection = await modelSelectionConfigRepository.read();
+      // 能力模型选择与默认选择来自同一份 Personal 文件，一次读取一起取。
+      const configuredCapabilityModelSelections =
+        await modelSelectionConfigRepository.readCapabilitySelections();
       return Object.freeze({
         accountSource: standaloneAccount ?? accountSource,
         async syncAccountProviderConfig(next: AccountProviderConfigSnapshot): Promise<boolean> {
@@ -183,6 +186,9 @@ export async function startProcessProviderRegistryRuntime(
         snapshot,
         modelSelectionConfigRepository,
         configuredDefaultModelSelection,
+        ...(configuredCapabilityModelSelections
+          ? { configuredCapabilityModelSelections }
+          : {}),
       });
     } catch (error) {
       disposeCredentialSubscription?.();

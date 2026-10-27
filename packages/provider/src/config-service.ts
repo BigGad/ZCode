@@ -17,7 +17,7 @@ import {
   resolveProviderTemplateName,
 } from "./config/index.js";
 import { resolveOwnedOrder } from "./owned-order.js";
-import type { ModelSelection } from "@zcode/shared/model-selection";
+import type { CapabilityModelSelections, ModelSelection } from "@zcode/shared/model-selection";
 import type { ProviderConfigSnapshot, ProviderSource } from "./sources.js";
 
 export interface ProviderConfigLayerSnapshot {
@@ -27,6 +27,8 @@ export interface ProviderConfigLayerSnapshot {
   readonly models: ModelConfigRules;
   readonly providerOrder?: readonly ProviderId[];
   readonly defaultModelSelection?: ModelSelection;
+  /** 能力 → 模型选择（capability-model-selection.md）；与默认选择同一份文件、同一份事务。 */
+  readonly capabilityModelSelections?: CapabilityModelSelections;
 }
 
 export interface ProviderConfigLayerUpdate {
@@ -35,6 +37,8 @@ export interface ProviderConfigLayerUpdate {
   readonly models: ModelConfigRules;
   readonly providerOrder?: readonly ProviderId[];
   readonly defaultModelSelection?: ModelSelection;
+  /** 能力 → 模型选择（capability-model-selection.md）；与默认选择同一份文件、同一份事务。 */
+  readonly capabilityModelSelections?: CapabilityModelSelections;
 }
 
 export interface PersonalProviderConfigRepository extends ProviderSource<ProviderConfigLayerSnapshot> {
@@ -572,6 +576,8 @@ export class ProviderConfigService implements ProviderSource<ProviderConfigSnaps
     return this.#personalRepository.update((current) => ({
       // Provider/Model/排序只修改自己的成员，不能因共用文件清掉默认选择。
       defaultModelSelection: current.defaultModelSelection,
+      // 能力模型与默认模型共用同一份 Personal 文件；同样不能在成员变更里被抹掉。
+      capabilityModelSelections: current.capabilityModelSelections,
       ...transform(current),
     }));
   }

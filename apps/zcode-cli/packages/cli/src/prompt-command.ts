@@ -250,6 +250,12 @@ export const runPrompt = async (
       ...(providerEndpointRoutingPort ? { providerEndpointRoutingPort } : {}),
       providerRegistry: providerRegistryRuntime.runtime.registryService,
       configuredDefaultModelSelection: providerRegistryRuntime.configuredDefaultModelSelection,
+      ...(providerRegistryRuntime.configuredCapabilityModelSelections
+        ? {
+            configuredCapabilityModelSelections:
+              providerRegistryRuntime.configuredCapabilityModelSelections,
+          }
+        : {}),
       ...(providerRegistryRuntime.providerRuntimeHeadersPort
         ? {
             providerRuntimeHeadersPort: providerRegistryRuntime.providerRuntimeHeadersPort,

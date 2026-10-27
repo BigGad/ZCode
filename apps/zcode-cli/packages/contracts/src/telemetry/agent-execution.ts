@@ -5,6 +5,8 @@ export const TELEMETRY_SCHEMA_VERSION = 6 as const;
 
 export const AgentTelemetryOperation = {
   AgentStep: "agent_step",
+  /** 能力模型代主模型理解图片（capability-model-selection.md）。 */
+  CapabilityImageUnderstanding: "capability_image_understanding",
   ContextCompaction: "context_compaction",
   GoalCompletionVerification: "goal_completion_verification",
   GoalTitleGeneration: "goal_title_generation",

@@ -41,6 +41,7 @@ import {
   runtimeMetadataForSyntheticUserMessageSource,
 } from "../helpers/index.js";
 import { resolveTurnAttachments } from "../helpers/attachments.js";
+import { resolveCapabilityImageDescriptionPort } from "./capability-image-understanding.js";
 import { emitTurnAttachmentPageCounts } from "./turn-attachment-page-counts.js";
 import type { ActiveTurnSteeringState, ExecuteTurnOptions, TurnResult } from "../types.js";
 import type { ActiveTurnStartReservation } from "../types.js";
@@ -447,6 +448,11 @@ export async function executeTurnCommand(
           abortSignal: turnAbortSignal,
           artifactStore: this.artifactStore,
           fileSystemPort: this.fileSystemPort,
+          // 主模型不支持图片时，用能力模型把图片读成文字（capability-model-selection.md §5）。
+          imageDescription: resolveCapabilityImageDescriptionPort(this, {
+            abortSignal: turnAbortSignal,
+            traceContext: turnTraceContext,
+          }),
           imageProcessorPort: this.imageProcessorPort,
           modelInputFormat: (submissionModel ?? admittedModel)?.properties.inputFormat,
           pdfDocumentPort: this.pdfDocumentPort,

@@ -64,7 +64,11 @@ export interface RecognizeCommandDependencies {
   signal?: AbortSignal;
   now?: () => number;
   /** 注入点：直接给出模型候选与默认选择，跳过 provider registry（测试/嵌入用）。 */
-  modelResolution?: { candidates: readonly ImageModelCandidate[]; configuredDefault?: ModelSelection };
+  modelResolution?: {
+    candidates: readonly ImageModelCandidate[];
+    configuredCapability?: ModelSelection;
+    configuredDefault?: ModelSelection;
+  };
   /** 注入点：单图识别实现；给了就不建 app、不订阅会话事件（测试/嵌入用）。 */
   recognizeImage?: (dispatch: RecognizeImageDispatch) => Promise<RecognizeResult>;
 }
@@ -140,9 +144,12 @@ export async function runRecognizeCommand(
     // 与 scope 错误同级：就地报错并返回 1，而不是把裸异常抛给顶层兜底。
     let selection: ModelSelection;
     try {
+      const configuredCapability =
+        deps.modelResolution?.configuredCapability ?? runtime?.configuredCapability;
       selection = pickRecognizeModelSelection({
         ...(cmdOptions.model === undefined ? {} : { explicit: cmdOptions.model }),
         candidates: deps.modelResolution?.candidates ?? runtime?.candidates ?? [],
+        ...(configuredCapability ? { configuredCapability } : {}),
         ...(deps.modelResolution?.configuredDefault ?? runtime?.configuredDefault
           ? { configuredDefault: (deps.modelResolution?.configuredDefault ?? runtime?.configuredDefault)! }
           : {}),
