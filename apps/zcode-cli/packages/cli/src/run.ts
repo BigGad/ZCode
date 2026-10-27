@@ -1,4 +1,5 @@
 import { extractDisallowedToolsArgs, parseGlobalArgs } from "./arguments.js";
+import { parseCapabilityOverrides } from "./capability-override.js";
 import { createNodeLoggerFactory } from "@zcode/adapters";
 import { getRuntimeInfo, type PresentationSurface } from "@zcode/core";
 import { color, formatJson, supportsColor } from "@zcode/core";
@@ -16,6 +17,7 @@ import { detectCliLocale } from "./locale.js";
 import { loadBootstrapModule } from "./bootstrap-loader.js";
 import { runEmbeddedSearchCli } from "./internal-search/embedded-search-cli.js";
 import { runCommandsCommand } from "./commands-command.js";
+import { runProvidersCommand } from "./providers-command.js";
 import { resolveCliCwd } from "./cwd.js";
 import { runLoginCommand, runLogoutCommand } from "./login-command.js";
 import { runUsageCommand } from "./usage-command.js";
@@ -104,10 +106,12 @@ const globalOptions = (
   browserUse: GlobalOptions["browserUse"],
   browserExecutable: GlobalOptions["browserExecutable"],
   outputFormat: GlobalOptions["outputFormat"],
+  capabilityOverrides: GlobalOptions["capabilityOverrides"],
 ): GlobalOptions => {
   return {
     browserExecutable,
     browserUse,
+    ...(capabilityOverrides ? { capabilityOverrides } : {}),
     detectedLocale,
     force: values.force === true,
     json: values.json === true,
@@ -409,6 +413,20 @@ export const run = async (ctx: RunContext, deps: RunDependencies = {}): Promise<
     ctx.stderr.write(`${message}\n`);
     return 1;
   }
+  // `--capability <能力键>=<类型名>`：先校验语法与能力键，未知能力就地报错退出。
+  let capabilityOverrides: GlobalOptions["capabilityOverrides"];
+  {
+    const parsedOverrides = parseCapabilityOverrides(parsed.values.capability ?? []);
+    if (parsedOverrides.error) {
+      ctx.stderr.write(`${parsedOverrides.error}\n`);
+      return 1;
+    }
+    if (parsedOverrides.overrides && parsedOverrides.overrides.length > 0) {
+      capabilityOverrides = Object.fromEntries(
+        parsedOverrides.overrides.map((override) => [override.capability, override.typeName]),
+      );
+    }
+  }
   const options = globalOptions(
     parsed.values,
     locale,
@@ -416,6 +434,7 @@ export const run = async (ctx: RunContext, deps: RunDependencies = {}): Promise<
     browserUse,
     browserExecutable,
     outputFormat,
+    capabilityOverrides,
   );
   const forceMcs = parsed.values["force-mcs"] === true;
   let targetRequest: CliTargetRequest | undefined;
@@ -618,6 +637,14 @@ export const run = async (ctx: RunContext, deps: RunDependencies = {}): Promise<
       );
     case "skills":
       return await runSkillsCommand(ctx, options, commandDeps, parsed.positionals.slice(1));
+    case "providers":
+      return await runProvidersCommand(
+        ctx,
+        options,
+        commandDeps,
+        parsed.positionals.slice(1),
+        parsed.values["dry-run"] === true ? { dryRun: true } : {},
+      );
     case "usage":
       return await runUsageCommand(ctx, options, {
         ...(typeof parsed.values.since === "string" ? { since: parsed.values.since } : {}),

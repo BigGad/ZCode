@@ -49,6 +49,12 @@ export const parseGlobalArgs = (argv: string[]) =>
       "model-type": {
         type: "string",
       },
+      // `--capability <能力键>=<类型名>`：本次运行里某个能力由哪个命名类型承担
+      // （model-selections.md §6.3）。可重复传入。
+      capability: {
+        multiple: true,
+        type: "string",
+      },
       cwd: {
         type: "string",
       },
@@ -162,6 +168,10 @@ export const parseGlobalArgs = (argv: string[]) =>
       },
       // 内部旗标：--forever 后台子进程标记，不写入帮助文案。
       daemon: {
+        type: "boolean",
+      },
+      // `zcode providers init` 子命令旗标：生成具名模型类型（严格解析器要求全局注册）。
+      "dry-run": {
         type: "boolean",
       },
       // `zcode recognize` 子命令旗标：图片文件夹批量多模态识别（严格解析器要求全局注册，

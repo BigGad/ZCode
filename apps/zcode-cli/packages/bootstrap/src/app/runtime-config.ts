@@ -145,7 +145,11 @@ export function resolveAppRuntimeConfig(input: {
       resolveBashTimeoutPolicy(options.env ?? process.env),
     mode: options.runtimeConfig?.mode ?? persistedMode ?? configResult.config.permission.mode,
     modelSelection: initialModelSelection,
-    capabilityModelSelections: capabilityModelSelections.selections,
+    // 能力覆盖优先于表里同名能力键的默认解析结果（CLI `--capability image=…`）。
+    capabilityModelSelections: {
+      ...capabilityModelSelections.selections,
+      ...options.capabilityModelSelectionOverrides,
+    },
     // 仅接受显式传入的会话级工具面（ZCode Protocol session/create 或 CLI
     // --allowed-tools/--disallowed-tools）。不要从 config.permission.allowedTools
     // 回落：那个键的既有语义是“免审批清单”，把它投影到注册面会让老配置里

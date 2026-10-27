@@ -170,6 +170,13 @@ export interface ZCodeAppOptions {
    * 自动取用；其余类型名由调用方（CLI `--model-type`）按需点名。
    */
   configuredModelSelections?: ModelSelections;
+  /**
+   * 本次运行的能力覆盖（model-selections.md §6.3）：能力键 → 已解析的模型选择。
+   *
+   * 调用方（CLI `--capability image=image-cheap`）在本次运行里把某个能力改指到另一个
+   * 具名类型。覆盖优先于 `configuredModelSelections` 里同名能力键的默认解析结果。
+   */
+  capabilityModelSelectionOverrides?: ModelSelections;
   modelIoFullRetentionEnabled?: boolean;
   /** 同进程嵌入宿主可注入完整的 borrowed 进程级 Owner；Endpoint 配置不得覆盖它。 */
   telemetryOwner?: AgentTelemetryRuntimeOwner;

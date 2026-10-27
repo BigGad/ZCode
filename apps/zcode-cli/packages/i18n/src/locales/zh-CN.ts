@@ -21,6 +21,7 @@ export const zhCN: ZCodeCopy = {
   login [zai|bigmodel]  通过浏览器授权登录
   logout     删除共享的 Z.AI 登录凭据
   plugins    管理插件与市场（\`plugins list|install|uninstall|enable|disable|update|validate|marketplace ...\`；别名 plugin）
+  providers  在 Personal Provider Config 里生成具名模型类型（\`providers init [--dry-run]\`）
   recognize  批量识别图片文件夹（\`recognize <folder> [--schema description|qa|structured]\`；默认并发 4，逐张派发子代理）
   skills     列出本地 skills（\`skills list\`）
   stream     RTSP 网络流持续监控（\`stream list|analyze|watch|events\`；凭据存 ~/.zcode/cli/streams.json，告警保留 30 天）
@@ -35,6 +36,7 @@ export const zhCN: ZCodeCopy = {
   --memory-bench   配合 --prompt 开启自动 Memory 提取并等待后退出（需已开启 Memory）
   --pdf-password <pw>  配合 --prompt/--target 提供密码 PDF 的密码（单值适用于本次所有文件；进程列表对本机其他进程可见）
   --model-type <名字>  用 Personal Provider Config 里 modelSelections 的命名模型类型跑本次运行
+  --capability <能力键>=<名字>  本次运行里某个能力用哪个命名模型类型（如 image=image-cheap）；可重复传入
   --browser-use <mode> 启用 Browser Use backend（当前支持：headless）
   --surface <surface>  设置无头 prompt/app-server 的呈现面：terminal 或 desktop
   --browser-executable <path> headless Browser Use 使用的 Chrome/Chromium 路径

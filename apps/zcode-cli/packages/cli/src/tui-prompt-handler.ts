@@ -9,6 +9,7 @@ import { createCommandCenter, parseSlashCommand } from "./command-center.js";
 import type { CommandCenterApp } from "./command-center.js";
 import { resolveDisplayLocale } from "./locale.js";
 import { createCliHeadlessBrowserRuntime } from "./headless-browser.js";
+import { resolveCapabilityOverrides } from "./capability-override.js";
 import { listModelTypeOptions, resolveRequestedModelType } from "./model-type.js";
 // 复用防御式 runtime 读取：subscribeEvents 不在 app 的静态类型面上，
 // 两处各写一份「怎么把它读出来」就会在方法改名时只修好一处。
@@ -64,6 +65,7 @@ export function createTuiSubmitPrompt(
   browserExecutable?: GlobalOptions["browserExecutable"],
   workflowMode: DynamicWorkflowMode = DEFAULT_CLI_WORKFLOW_MODE,
   modelType?: GlobalOptions["modelType"],
+  capabilityOverrides?: GlobalOptions["capabilityOverrides"],
 ): TuiPromptHandler {
   let app: Awaited<ReturnType<NonNullable<RunDependencies["createZCodeApp"]>>> | undefined;
   let activeUiLocale = uiLocale;
@@ -160,6 +162,20 @@ export function createTuiSubmitPrompt(
         })
       : {};
     if (modelTypeSelection.error) throw new Error(modelTypeSelection.error);
+    // --capability <能力键>=<类型名>：本次运行里某个能力改指到另一个具名类型。
+    // 没有覆盖项时不读 Registry 视图：这条路径与模型选择无关。
+    const capabilityOverrideEntries = Object.entries(capabilityOverrides ?? {});
+    const capabilitySelectionOverrides = capabilityOverrideEntries.length
+      ? resolveCapabilityOverrides({
+          overrides: capabilityOverrideEntries.map(([capability, typeName]) => ({
+            capability,
+            typeName,
+          })),
+          configured: configuredModelSelections,
+          registry: providerRegistryRuntime.runtime.registryService.getView(),
+        })
+      : {};
+    if (capabilitySelectionOverrides.error) throw new Error(capabilitySelectionOverrides.error);
     let createdApp: Awaited<ReturnType<NonNullable<RunDependencies["createZCodeApp"]>>>;
     try {
       createdApp = await createAppFactory({
@@ -170,6 +186,9 @@ export function createTuiSubmitPrompt(
         providerRegistry: providerRegistryRuntime.runtime.registryService,
         configuredDefaultModelSelection,
         ...(configuredModelSelections ? { configuredModelSelections } : {}),
+        ...(capabilitySelectionOverrides.selections
+          ? { capabilityModelSelectionOverrides: capabilitySelectionOverrides.selections }
+          : {}),
         ...(providerRegistryRuntime.providerRuntimeHeadersPort
           ? {
               providerRuntimeHeadersPort: providerRegistryRuntime.providerRuntimeHeadersPort,

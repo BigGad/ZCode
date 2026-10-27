@@ -21,6 +21,7 @@ Commands:
   login [zai|bigmodel]  Sign in through browser authorization
   logout     Remove the shared Z.AI login credentials
   plugins    Manage plugins and marketplaces (\`plugins list|install|uninstall|enable|disable|update|validate|marketplace ...\`; alias: plugin)
+  providers  Generate named model types in your Personal Provider Config (\`providers init [--dry-run]\`)
   recognize  Batch-recognize an image folder (\`recognize <folder> [--schema description|qa|structured]\`; 4 subagents by default, one per image)
   skills     List local skills (\`skills list\`)
   stream     RTSP network stream monitoring (\`stream list|analyze|watch|events\`; credentials live in ~/.zcode/cli/streams.json, alerts are retained for 30 days)
@@ -35,6 +36,7 @@ Options:
   --memory-bench   With --prompt, enable automatic Memory extraction and wait before exiting (requires Memory enabled)
   --pdf-password <pw>  With --prompt/--target, password for password-protected PDFs (one value for all files this run; visible to other local processes via the process list)
   --model-type <name>  Use a named model type from Personal Provider Config (modelSelections) for this run
+  --capability <key>=<name>  Use a named model type for a capability in this run (e.g. image=image-cheap); repeatable
   --browser-use <mode> Enable Browser Use backend (supported: headless)
   --surface <surface>  Presentation surface for headless prompts/app-server: terminal or desktop
   --browser-executable <path> Chrome/Chromium executable for headless Browser Use

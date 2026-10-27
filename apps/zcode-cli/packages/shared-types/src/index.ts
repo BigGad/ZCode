@@ -30,6 +30,8 @@ export type GlobalOutputFormat = "text" | "json" | "stream-json";
 export type GlobalOptions = {
   browserExecutable?: string;
   browserUse?: "headless";
+  /** 本次运行的能力覆盖（--capability）：能力键 → 具名模型类型。 */
+  capabilityOverrides?: Readonly<Record<string, string>>;
   detectedLocale?: GlobalDetectedLocale;
   force: boolean;
   json: boolean;

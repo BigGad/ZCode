@@ -7,6 +7,7 @@ import type { GlobalOptions } from "@zcode/shared-types";
 import { loadBootstrapModule } from "./bootstrap-loader.js";
 import { createImageRecognizerAgentProfile, IMAGE_RECOGNIZER_AGENT_TYPE } from "./recognize-agent.js";
 import { judgeRecognizeGrounding, RECOGNIZE_UNGROUNDED_MESSAGE } from "./recognize-grounding.js";
+import { resolveCapabilityOverrides } from "./capability-override.js";
 import { resolveRequestedModelType } from "./model-type.js";
 import type { ImageModelCandidate } from "./recognize-model.js";
 import {
@@ -53,6 +54,8 @@ export interface RecognizeRuntime {
   candidates: readonly ImageModelCandidate[];
   /** `--model-type` 点名的模型类型（model-selections.md §6）。 */
   configuredModelType?: ModelSelection;
+  /** `--capability` 覆盖不了时的提示；命令层据此报错退出 1。 */
+  capabilityOverrideError?: string;
   /** `--model-type` 指向不存在的类型时的提示；命令层据此报错退出 1。 */
   modelTypeError?: string;
   /** 能力键 `image` 的类型（用户显式声明的「图片理解用这个模型」）。 */
@@ -73,6 +76,28 @@ export async function createRecognizeRuntime(input: {
     ? await prepareTelemetry(input.env, { cliVersion: input.version ?? "0.0.0" })
     : input.env;
   const registryRuntime = await bootstrap.startProcessProviderRegistryRuntime(appEnv);
+  const snapshot = registryRuntime.runtime.registryService.getSnapshot();
+  const registryView = snapshot?.registry ?? { revision: 0, providers: [] };
+  // 能力键与点名类型都要走 Registry 解析：既要确认模型真的支持图像，也要补齐可执行的
+  // 推理档位（Model Factory 只接受完整选择，缺档位会直接报错）。
+  const capabilityModel = resolveCapabilityModelSelections({
+    configured: registryRuntime.configuredModelSelections,
+    registry: registryView,
+  });
+  const modelType = resolveRequestedModelType({
+    name: input.options.modelType,
+    configured: registryRuntime.configuredModelSelections,
+    registry: registryView,
+  });
+  // --capability image=…：本次运行里图片理解改指到另一个具名类型（优先级高于能力键默认绑定）。
+  const capabilityOverride = resolveCapabilityOverrides({
+    overrides: Object.entries(input.options.capabilityOverrides ?? {}).map(
+      ([capability, typeName]) => ({ capability, typeName }),
+    ),
+    configured: registryRuntime.configuredModelSelections,
+    registry: registryView,
+  });
+  const capabilityImage = capabilityOverride.selections?.image ?? capabilityModel.selections.image;
   let app: RecognizeRuntime["app"] | undefined;
   try {
     app = await bootstrap.createZCodeApp({
@@ -84,6 +109,9 @@ export async function createRecognizeRuntime(input: {
         ? {
             configuredModelSelections: registryRuntime.configuredModelSelections,
           }
+        : {}),
+      ...(capabilityOverride.selections
+        ? { capabilityModelSelectionOverrides: capabilityOverride.selections }
         : {}),
       ...(registryRuntime.providerRuntimeHeadersPort
         ? { providerRuntimeHeadersPort: registryRuntime.providerRuntimeHeadersPort }
@@ -100,19 +128,6 @@ export async function createRecognizeRuntime(input: {
         },
       },
     });
-    const snapshot = registryRuntime.runtime.registryService.getSnapshot();
-    const registryView = snapshot?.registry ?? { revision: 0, providers: [] };
-    // 能力键与点名类型都要走 Registry 解析：既要确认模型真的支持图像，也要补齐可执行的
-    // 推理档位（Model Factory 只接受完整选择，缺档位会直接报错）。
-    const capabilityModel = resolveCapabilityModelSelections({
-      configured: registryRuntime.configuredModelSelections,
-      registry: registryView,
-    });
-    const modelType = resolveRequestedModelType({
-      name: input.options.modelType,
-      configured: registryRuntime.configuredModelSelections,
-      registry: registryView,
-    });
     return {
       app,
       candidates: snapshot === null ? [] : collectImageModelCandidates(snapshot.registry.providers),
@@ -121,9 +136,8 @@ export async function createRecognizeRuntime(input: {
         : {}),
       ...(modelType.selection ? { configuredModelType: modelType.selection } : {}),
       ...(modelType.error ? { modelTypeError: modelType.error } : {}),
-      ...(capabilityModel.selections.image
-        ? { configuredCapability: capabilityModel.selections.image }
-        : {}),
+      ...(capabilityOverride.error ? { capabilityOverrideError: capabilityOverride.error } : {}),
+      ...(capabilityImage ? { configuredCapability: capabilityImage } : {}),
       dispose: async () => {
         await app?.close?.().catch(() => undefined);
         registryRuntime.dispose();

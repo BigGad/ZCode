@@ -147,6 +147,7 @@ export async function runRecognizeCommand(
     let selection: ModelSelection;
     try {
       if (runtime?.modelTypeError) throw new Error(runtime.modelTypeError);
+      if (runtime?.capabilityOverrideError) throw new Error(runtime.capabilityOverrideError);
       const configuredModelType =
         deps.modelResolution?.configuredModelType ?? runtime?.configuredModelType;
       const configuredCapability =

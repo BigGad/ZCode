@@ -168,33 +168,57 @@ turn 开始
 
 描述请求是**独立于主 loop 的旁路调用**：它不占用主模型的重试预算，也不进入主 loop 的流式输出。
 
-## 6. Consumption B：`--model-type`
+## 6. Consumption B：`--model-type` 与 `--capability`
 
 ### 6.1 旗标
 
-`--model-type <名字>` 是**全局**旗标（严格解析器要求全局注册；作用域校验在各入口）。
-它与 `zcode recognize` 自己的 `--model <providerId>/<modelId>[$reasoningLevel]` 完全不冲突，
-两者取值格式不同、职责不同。
+- `--model-type <名字>`：**全局**旗标，点名本次运行的**主模型**。
+- `--capability <能力键>=<类型名>`：**全局**旗标，可重复，点名本次运行里某个**能力**由哪个类型承担。
+
+两者与 `zcode recognize` 自己的 `--model <providerId>/<modelId>[$reasoningLevel]` 取值格式不同、
+职责不同，互不冲突。
 
 ### 6.2 生效范围与优先级
 
 | 入口 | 行为 | 优先级 |
 | --- | --- | --- |
 | `zcode -p "…" --model-type fast` | 本次无头运行的主模型 = `modelSelections.fast` | 高于 `defaultModelSelection` |
+| `zcode -p "…" --capability image=image-cheap` | 本次运行的图片理解模型 = `modelSelections.image-cheap` | 高于能力键的默认绑定 |
 | `zcode --model-type fast`（TUI 启动） | TUI 打开时的初始模型 = `modelSelections.fast` | 同上 |
+| `zcode --capability image=image-cheap`（TUI 启动） | 本次运行的图片理解模型同上 | 同上 |
 | TUI 会话内 `/model-type fast` | 立刻切到该类型（等价于 `/model` 选中的那次切换） | 用户显式指令，最高 |
 | `zcode recognize ./imgs --model-type vision` | 识别子代理跑在 `modelSelections.vision` | **低于** recognize 自己的 `--model` |
+| `zcode recognize ./imgs --capability image=vision` | 同上，但走能力键路径 | 同上 |
 
-`zcode recognize` 的完整优先级：`--model` > `--model-type` > `capabilityModelSelections` 里的
-`image` 类型 > 会话默认（须支持图像） > registry 快照里第一个 `supportsImage: true` 的模型。
+`zcode recognize` 的完整优先级：`--model` > `--model-type` > 能力键 `image` 的绑定
+（`--capability image=…` 覆盖后的结果） > 会话默认（须支持图像） > registry 快照里第一个
+`supportsImage: true` 的模型。
 
-### 6.3 恢复会话时的归属
+### 6.3 能力键的默认绑定与覆盖
+
+能力键 `image` 的**默认**绑定是表里叫 `image` 的那一项（能力键就是表里的键）。
+`--capability image=image-cheap` 只在**本次运行**内把它换成 `image-cheap`：
+
+```
+配置：
+  modelSelections = { main: …, image-cheap: …, image-best: … }
+
+zcode -p "看图" --model-type main --capability image=image-cheap
+zcode -p "看图" --model-type main --capability image=image-best
+```
+
+覆盖项必须**真的支持该能力**：指向一个不支持图像的模型时报错，不静默降级成「不委派」。
+
+`--capability` 是**启动期**旋钮（能力选择随 runtime config 冻结）；要在 TUI 会话中途换
+图片理解模型需重启 CLI。`/model-type` 换的是主模型，runtime 支持热切，两者语义不同。
+
+### 6.4 恢复会话时的归属
 
 `--model-type` 决定**本次运行的初始模型**。恢复会话（`--resume` / `-c`）时，
 会话已存的有效模型选择仍然优先 —— 这是既有恢复契约，不因本 spec 改变。
 要在恢复的会话里换模型，用 TUI 的 `/model` 或 `/model-type`。
 
-### 6.4 找不到类型时的行为
+### 6.5 找不到类型时的行为
 
 无头入口（`-p` / `recognize`）：
 
@@ -205,10 +229,38 @@ Unknown model type: <名字>. Available types: fast, image, main
 写 stderr 一行，退出码 1 —— 与 scope 错误同级，不把裸异常抛给顶层兜底。
 列表来自用户配置里**实际存在**的类型名，按字典序排列；没有类型时写 `Available types: (none)`。
 
+`--capability` 的两种错误：
+
+```
+Unknown capability: pdf. Available capabilities: image
+Capability model type "nope" is not usable for image: model-type-not-configured
+```
+
 TUI 启动时同理：报错并退出 1，不打开 TUI。
 TUI 会话内 `/model-type` 未知类型时，在 TUI 里回一行同样的提示，**不**退出。
 
-## 7. Observability
+## 7. Consumption C：`zcode providers init`（生成配置）
+
+`zcode providers init` 从**用户真实配置的 provider** 生成具名模型类型，让配置立刻可用
+（`zcode -p "…" --model-type main` 直接能跑）。
+
+生成的类型：
+
+| 类型名 | 指向 |
+| --- | --- |
+| `main` | 当前 `defaultModelSelection`；没有默认就用 registry 第一个可选模型 |
+| `image` | 当前默认选择**支持图像时**就是它；否则取第一个支持图像输入的模型 |
+| `<providerId>` | 该 provider 的第一个可选模型 —— 「多套模型地址」各自有个能点名的类型 |
+
+**写回是合并语义**：已有的同名类型不动（用户可能手调过档位或指向别的模型），
+已有的 provider 规则与凭据也一律不动；只有缺失的类型被补上。命令**幂等**：再跑一次不会改任何东西。
+
+`--dry-run` 只打印将要写入的内容，不落盘。
+
+Registry 里一个可选模型都没有时，命令报错退出 1 —— 没有真实模型可指时不该生成假类型
+（假类型会撞上「缺 `options.reasoningLevel` 静默换模型」那个坑）。
+
+## 8. Observability
 
 - 能力模型解析失败：`warn`，事件 `capability_model_selection.unresolved`，带 capability + issue code。
 - 描述成功：`info`，事件 `capability_image_understanding.completed`，带 providerId/modelId/耗时/字符数。
@@ -219,7 +271,7 @@ TUI 会话内 `/model-type` 未知类型时，在 TUI 里回一行同样的提�
 
 日志不含图片内容、data URL 或凭据。
 
-## 8. Acceptance
+## 9. Acceptance
 
 1. 未配置 `modelSelections` 时，行为与本 spec 之前**逐字节一致**（含 omitted-media 文本）。
 2. 主模型不支持图片 + 配置了 `image` 类型 + 附一张图：provider 请求里**没有** image block，
@@ -234,8 +286,10 @@ TUI 会话内 `/model-type` 未知类型时，在 TUI 里回一行同样的提�
    **不**抛 `Reasoning level is required`。
 8. `--model-type` 指向不存在的类型：无头入口 stderr 一行 + exit 1，提示里列出可用类型。
 9. TUI 内 `/model-type fast` 与 `/model <provider>/<model>` 一样会保存为会话的默认选择。
+10. `zcode providers init` 生成后，`--model-type main` / `--model-type image` 立刻可用；
+    再跑一次不改动任何已有类型与凭据。
 
-## 9. 验证记录
+## 10. 验证记录
 
 真实链路（Personal Provider Config：主模型 `minimax/MiniMax-M2.7`（`supportsImage: false`），
 `image` 类型 `mimo/mimo-v2.6-pro`（`supportsImage: true`））：

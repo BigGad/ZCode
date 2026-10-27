@@ -64,6 +64,35 @@ export interface ResolvedCapabilityModelSelections {
 }
 
 /**
+ * 解析「某个能力由哪个类型承担」。
+ *
+ * 与 `resolveModelTypeSelection` 的区别：这里**额外校验能力位**。
+ * 能力键的默认绑定是表里同名的键；调用方（`--capability image=image-cheap`）
+ * 可以在本次运行里改指另一个类型，但被指的类型必须真的支持该能力 ——
+ * 指向不支持图像的模型时报错，不静默降级成「不委派」。
+ */
+export function resolveCapabilityModelSelection(input: {
+  readonly capability: ModelCapability;
+  readonly typeName: string;
+  readonly configured?: ModelSelections;
+  readonly registry: ProviderRegistryView;
+}): ModelTypeSelectionResult {
+  const result = resolveModelTypeSelection({
+    name: input.typeName,
+    configured: input.configured,
+    registry: input.registry,
+  });
+  if (!result.selection) return result;
+
+  const model = findModel(input.registry, result.selection);
+  if (!model) return { issue: "model-not-found" };
+  if (!modelSupportsCapability(model, input.capability)) {
+    return { issue: "capability-not-supported" };
+  }
+  return result;
+}
+
+/**
  * 解析全部**能力键**的模型选择。
  *
  * 每个能力独立解析：某一个能力配置失效不影响其它能力。未知类型名保留在配置里

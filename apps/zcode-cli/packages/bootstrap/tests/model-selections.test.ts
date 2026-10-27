@@ -63,6 +63,7 @@ function provider(input: {
 
 function resolve(input: {
   configuredModelSelections?: Record<string, { providerId: string; modelId: string }>;
+  capabilityModelSelectionOverrides?: Record<string, { providerId: string; modelId: string }>;
 }) {
   return resolveAppRuntimeConfig({
     cliStorageRoot: "/tmp/zcode-cli",
@@ -74,6 +75,11 @@ function resolve(input: {
       ]),
       ...(input.configuredModelSelections
         ? { configuredModelSelections: input.configuredModelSelections }
+        : {}),
+      ...(input.capabilityModelSelectionOverrides
+        ? {
+            capabilityModelSelectionOverrides: input.capabilityModelSelectionOverrides,
+          }
         : {}),
     },
     subagentOutputRootDir: "/tmp/zcode-cli/agents",
@@ -130,5 +136,48 @@ describe("runtimeConfig 的能力模型选择", () => {
 
     expect(resolved.runtimeConfig.capabilityModelSelections).toEqual({});
     expect(resolved.capabilityModelSelectionIssues).toEqual([]);
+  });
+
+  it("能力覆盖优先于表里同名能力键的默认绑定", () => {
+    const resolved = resolve({
+      configuredModelSelections: {
+        image: { providerId: "text-only", modelId: "text-model" },
+      },
+      // 覆盖项已由 CLI 解析成完整选择（档位已补齐）。
+      capabilityModelSelectionOverrides: {
+        image: {
+          providerId: "vision",
+          modelId: "vision-model",
+          options: { reasoningLevel: "low" },
+        },
+      },
+    });
+
+    expect(resolved.runtimeConfig.capabilityModelSelections).toEqual({
+      image: {
+        providerId: "vision",
+        modelId: "vision-model",
+        options: { reasoningLevel: "low" },
+      },
+    });
+  });
+
+  it("覆盖只影响被覆盖的能力，其余能力仍走默认解析", () => {
+    const resolved = resolve({
+      configuredModelSelections: {
+        image: { providerId: "vision", modelId: "vision-model" },
+      },
+      capabilityModelSelectionOverrides: {
+        image: {
+          providerId: "vision",
+          modelId: "vision-model",
+          options: { reasoningLevel: "high" },
+        },
+      },
+    });
+
+    expect(resolved.runtimeConfig.capabilityModelSelections?.image?.options).toEqual({
+      reasoningLevel: "high",
+    });
   });
 });

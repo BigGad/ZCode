@@ -11,6 +11,7 @@ import {
 import { loadCliDotenv } from "./env.js";
 import { createCliHeadlessBrowserRuntime } from "./headless-browser.js";
 import { IMAGE_EXTENSIONS } from "./image-extensions.js";
+import { resolveCapabilityOverrides } from "./capability-override.js";
 import { resolveRequestedModelType } from "./model-type.js";
 import {
   createHeadlessPermissionBroker,
@@ -252,6 +253,24 @@ export const runPrompt = async (
       providerRegistryRuntime.dispose();
       return 1;
     }
+    // --capability <能力键>=<类型名>：本次运行里某个能力改指到另一个具名类型。
+    // 没有覆盖项时不读 Registry 视图：这条路径与模型选择无关。
+    const capabilityOverrideEntries = Object.entries(options.capabilityOverrides ?? {});
+    const capabilityOverrides = capabilityOverrideEntries.length
+      ? resolveCapabilityOverrides({
+          overrides: capabilityOverrideEntries.map(([capability, typeName]) => ({
+            capability,
+            typeName,
+          })),
+          configured: providerRegistryRuntime.configuredModelSelections,
+          registry: providerRegistryRuntime.runtime.registryService.getView(),
+        })
+      : {};
+    if (capabilityOverrides.error) {
+      ctx.stderr.write(`${capabilityOverrides.error}\n`);
+      providerRegistryRuntime.dispose();
+      return 1;
+    }
     browserRuntime = createCliHeadlessBrowserRuntime(options, deps);
     app = await createApp({
       browserControlPort: browserRuntime?.browserControlPort,
@@ -270,6 +289,9 @@ export const runPrompt = async (
         ? {
             configuredModelSelections: providerRegistryRuntime.configuredModelSelections,
           }
+        : {}),
+      ...(capabilityOverrides.selections
+        ? { capabilityModelSelectionOverrides: capabilityOverrides.selections }
         : {}),
       ...(providerRegistryRuntime.providerRuntimeHeadersPort
         ? {
