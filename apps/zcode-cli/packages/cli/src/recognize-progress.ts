@@ -36,6 +36,11 @@ export interface RecognizeProgressLine {
   outcome?: "ok" | "error";
   durationMs?: number;
   error?: string;
+  /**
+   * 第几次派发（1 = 首次）。接地重试会复用同一个 index 再起一个子代理（spec §5.1），
+   * 于是同一张图会出现第二组 started/message/stopped 行——`attempt` 让消费方能区分。
+   */
+  attempt?: number;
 }
 
 /**
@@ -91,6 +96,8 @@ export function createRecognizeProgressReporter(
 
   const accumulated = new Map<number, string>();
   const lastMessageAt = new Map<number, number>();
+  /** 每个 index 已派发过几次：接地重试会再起一个子代理（spec §5.1）。 */
+  const attempts = new Map<number, number>();
 
   const previewOf = (index: number): string => {
     const text = (accumulated.get(index) ?? "").replace(/\s+/gu, " ").trim();
@@ -102,6 +109,14 @@ export function createRecognizeProgressReporter(
       const payload = asRecord(event.payload);
       const identity = byParentToolCallId.get(String(payload.parentToolCallId ?? ""));
       if (identity === undefined) return;
+      // 接地重试（spec §5.1）会为同一张图再起一个子代理：第一次的正文被丢弃，
+      // 它的预览不能混进第二次的 message 行——重置累积与节流窗口。
+      const attempt = (attempts.get(identity.index) ?? 0) + 1;
+      attempts.set(identity.index, attempt);
+      if (attempt > 1) {
+        accumulated.delete(identity.index);
+        lastMessageAt.delete(identity.index);
+      }
       // 流式事件以 runner 另铸的子会话 id 为 sessionId（见 RecognizeProgressIdentity 注释），
       // 这里是唯一能拿到它的时机；先登记再发 started，保证后续 text_delta 不会扑空。
       const childSessionId = payload.childSessionId;
@@ -113,6 +128,7 @@ export function createRecognizeProgressReporter(
         subagentId: identity.subagentId,
         shortId: identity.shortId,
         stage: "started",
+        attempt,
       });
       return;
     }
@@ -133,6 +149,7 @@ export function createRecognizeProgressReporter(
         shortId: identity.shortId,
         stage: "stopped",
         outcome,
+        attempt: attempts.get(identity.index) ?? 1,
         ...(durationMs === undefined ? {} : { durationMs }),
         ...(error === undefined ? {} : { error }),
       });
@@ -156,6 +173,7 @@ export function createRecognizeProgressReporter(
       subagentId: identity.subagentId,
       shortId: identity.shortId,
       stage: "message",
+      attempt: attempts.get(identity.index) ?? 1,
       preview: previewOf(identity.index),
     });
   };
@@ -168,17 +186,19 @@ export function formatRecognizeProgressLine(
 ): string {
   const ordinal = String(line.index + 1).padStart(String(total).length, "0");
   const head = `[${ordinal}/${total} ${line.subagentId} ${line.shortId}]`;
+  // 接地重试（spec §5.1）：同一张图的第二次派发，标出来免得看起来像重复行。
+  const retry = (line.attempt ?? 1) > 1 ? " (retry)" : "";
   switch (line.stage) {
     case "started":
-      return `${head} started\n`;
+      return `${head} started${retry}\n`;
     case "message":
-      return `${head} message   "${line.preview ?? ""}"\n`;
+      return `${head} message   "${line.preview ?? ""}"${retry}\n`;
     case "stopped": {
       const seconds = `${((line.durationMs ?? 0) / 1000).toFixed(1)}s`;
       if (line.outcome === "error") {
-        return `${head} stopped   FAIL ${seconds}${line.error ? ` ${line.error}` : ""}\n`;
+        return `${head} stopped   FAIL ${seconds}${line.error ? ` ${line.error}` : ""}${retry}\n`;
       }
-      return `${head} stopped   ok ${seconds}\n`;
+      return `${head} stopped   ok ${seconds}${retry}\n`;
     }
   }
 }

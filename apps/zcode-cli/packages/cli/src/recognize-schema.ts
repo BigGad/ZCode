@@ -109,6 +109,17 @@ export interface RecognizeDispatchPrompt {
 }
 
 /**
+ * 读图指令的强度（spec §5.1「接地不变量」）。
+ *
+ * - `standard`：第一次派发——把「先读图再作答」写进 prompt。
+ * - `strict`：未接地后的**重试**——点名上一轮没读图、并要求读不到就如实报 unreadable。
+ */
+export type RecognizeReadDirective = "standard" | "strict";
+
+/** 读不到图时的统一失败形状：模型自己回这个形状时会被 `parseRecognizeResult` 透传。 */
+const UNREADABLE_REPLY = '{"status":"error","reason":"unreadable","message":"<why the image could not be read>"}';
+
+/**
  * 构造派发给单个 image-recognizer 子代理的 prompt（含图像路径、mode、schema 文本）。
  * schema 以文本嵌入，v1 靠 prompt 约束 + 后置解析，不依赖 response_format。
  */
@@ -117,6 +128,7 @@ export function buildRecognizeDispatchPrompt(input: {
   mode: RecognizeMode;
   fields?: readonly string[];
   questions?: readonly string[];
+  readDirective?: RecognizeReadDirective;
 }): RecognizeDispatchPrompt {
   const { imagePath, mode } = input;
   const fields = input.fields ?? [];
@@ -143,10 +155,37 @@ export function buildRecognizeDispatchPrompt(input: {
     "",
     taskText,
     "",
+    ...buildReadDirectiveLines(input.readDirective ?? "standard", imagePath),
     "Reply with the JSON object only, conforming to jsonSchema. No markdown fences.",
   ].join("\n");
 
   return { prompt, jsonSchemaText };
+}
+
+/**
+ * 读图指令正文。
+ *
+ * 为什么必须显式写进 prompt（spec §5.1，运行时证据见 `recognize-grounding.ts`）：
+ * 图**不在**模型请求里，只在模型自己调 `Read` 时才到达。模型可以跳过 `Read` 直接作答，
+ * 于是吐出一段从未见过这张图的「像模像样」文字（实测有 Vue.js 文档、虚构访谈节目）。
+ * 指令只能提高读图率，**不能**替代接地判定——判定在 `recognize-runtime.ts` 里 fail-closed。
+ */
+function buildReadDirectiveLines(
+  directive: RecognizeReadDirective,
+  imagePath: string,
+): readonly string[] {
+  if (directive === "strict") {
+    return [
+      "IMPORTANT: your previous attempt answered WITHOUT reading the image, so that answer had no image basis and was discarded.",
+      `You MUST first call the Read tool with exactly this file_path: ${imagePath}`,
+      "Only then answer, and only from the image content you actually loaded.",
+      `If the image still cannot be read, reply exactly with ${UNREADABLE_REPLY} instead of guessing.`,
+    ];
+  }
+  return [
+    "Read the image first: call the Read tool with the file_path above, then answer from what the image shows.",
+    "Do not answer from prior knowledge and do not invent content; if the image cannot be read, reply with the error object instead.",
+  ];
 }
 
 function isConfidence(value: unknown): value is number {

@@ -127,6 +127,48 @@ profile 定义在 `recognize-agent.ts` 里，是 **TS 常量而不是 `agents/*.
 - `color: cyan`（UI 端 agent 卡片色，headless 不显）
 - 无 `thoughtLevel`（识别是单次结构化输出，无需扩展推理）
 - 失败时按约定回 `{"status":"error","reason":"unreadable","message":"…"}`，由后置解析透传
+- **读图是硬前置**：没读图的子代理输出不得被采纳（见 §5.1）
+
+### 5.1 接地不变量：没读图 ⇒ 正文不得采纳
+
+**为什么有这条（运行时证据，不是推测）**
+
+`image-recognizer` 的图**不在**模型请求里，只在模型**自己调 `Read`** 时才作为附件到达
+（§5 的「唯一工具：`Read`」）。模型**可以跳过 `Read` 直接作答**——此时它从未见过这张图，
+却照样能吐出一段像模像样的文字。
+
+实测（律小虾 2026-10-24 22:04 跑批，76 页 / 157 个子代理）：
+
+- 22 个子代理 **0 次工具调用**（从未读图）；其中 21 页的正文被当成**成功**结果收进页卡
+  （`content_status: "recognized"`），编造内容包括一段 Vue.js 文档、虚构的访谈节目、
+  QQ 群广告、内部心跳日志、一段英文论文摘要；
+- 同一张图的另一次派发（结构化抽取）**读了图**，答案正确（人名、地址都对）
+  → 判据是「有没有读图」，与「图片难不难」无关。
+
+对法律工作底稿而言，编造的转写比空白危险得多。**宁缺毋造**：没有图像依据的正文
+一律不得作为识别结果返回。
+
+**判据**
+
+子代理输出契约里已有 `totalToolUseCount`（`contracts/src/tools/agent.ts`）。`image-recognizer`
+profile 只有 `Read` 一个可用工具（`tools: ["Read"]`），故：
+
+| `totalToolUseCount` | 判定 | 处置 |
+| --- | --- | --- |
+| `0` | **未接地**：模型从未读过这张图 | ① 用「强制读图」指令**重试一次**；② 仍为 `0` ⇒ 返回 `{"status":"error","reason":"unreadable"}`，**正文丢弃** |
+| `≥ 1` | 接地（读到了图） | 正常采纳正文 |
+
+未接地时第一次的正文**一律丢弃**（不返回、不进 Results、只作为重试的触发信号）。
+
+**已知边界**：`Read` 之外的工具调用（例如 `RespondToCoordinator`）也计入该计数，理论上
+存在「只调了别的工具」的漏判；实测 20 例 `RespondToCoordinator` 调用全部与 `Read` 同时出现。
+精确到「`Read` 命中指定路径且成功」的判据见 §11。
+
+**重试指令**
+
+第一次派发即在 prompt 里显式要求「先读图再作答」（降低跳过率）；重试时用更硬的措辞，
+点名 `file_path`，并明确「读不到就回 `unreadable`，不要凭空作答」。两次都没读到 ⇒ 该图失败，
+调用方据此记为缺口。
 
 ## 6. Structured Output
 
@@ -194,6 +236,7 @@ v1 不在 `SubagentPort` 透传 `response_format`，靠 prompt 嵌入 schema + �
 - **进度归并键有两个，不能互换**（运行时证据：`core/src/subagent/runner.ts` 的 `createSubagentLifecycle` / `runExploreAgent`）：`SubagentSpawned` / `SubagentStopped` 载荷里带的是合成的 `parentToolCallId`；而子会话流式事件（`ModelStreaming`）的 `event.sessionId` 是 runner **另铸**的 `sess_subagent_<agentId>`——runner 无视 `request.sessionId`，一律用 `lifecycle.childSessionId` 建子 runtime。所以流式归并键只能在收到 `SubagentSpawned`（载荷带 `childSessionId`）时学到，不能预先合成；`stopped` 时出栈，迟到的同 id 事件不再归并。
 - **实时正文来源**：`SubagentMessage` 类型已定义但 core 未从该路径 emit（见 §10），所以 `message` 行只认 `ModelStreaming` 的 `kind: "text_delta"`，由 `subagent.ts` 的 `eventSink` 经 `notifyEventSinks(event, { sessionId: childSessionId })` 扇出到父 runtime 的外部 sink。
 - **中止传播**：`SubagentRunOptions.signal` 接 `AbortController`；worker 在取到 index 时检查 `signal.aborted`，命中则回填 `aborted before dispatch` 的 failure item。全局 SIGINT 归 `shutdown.ts`，本命令不注册第二个 handler（AGENTS.md 收敛外 I/O 边界）。
+- **接地重试不占额外并发槽**：未接地时的重试在**同一个 worker 槽内串行**发生（§5.1），因此并发上限恒为 `clamp(maxConcurrency, 1, totalImages)`，重试不会突破并发契约。
 - **订阅顺序**：`writePlan` 之后、任何派发之前建立订阅（避免首个 `SubagentSpawned` 漏到 handler 之前），批次结束在 `finally` 里 detach。
 
 ## 8. Failure Semantics
@@ -206,6 +249,7 @@ v1 不在 `SubagentPort` 透传 `response_format`，靠 prompt 嵌入 schema + �
 | 配置无 vision 模型 / `--model` 串非法 | stderr 一行（`NO_VISION_MODEL_MESSAGE` 或解析错误原文），stdout 空 | 1 |
 | `subagents.enabled=false` | 每张图各得一条 `reason: "other"` 的失败（message 为 `Subagents are disabled in this runtime (subagents.enabled=false).`）；因无成功项而 exit 1。见 §10 | 1 |
 | 单图 sub-agent 抛错 | 该条 `status: "error"`，reason 走 failure envelope | 不影响兄弟 |
+| 子代理没读图（两次派发都 0 工具调用，见 §5.1） | 该条 `status: "error"`，`reason: "unreadable"`，正文丢弃 | 不影响兄弟 |
 | 子代理返回文本不能 parse 成 schema | 该条 `status: "error"`, `reason: "schema_mismatch"`，原文本丢弃（`--verbose` 时保留 evidence） | 不影响兄弟 |
 | 全部图片失败 | 正常打印 Plan + Results + Summary，exit 1 | 1 |
 | 部分图片失败 | 正常打印 Plan + Results + Summary，exit 0 | 0 |
@@ -252,6 +296,8 @@ stderr 实时进度：
 
 `message` 行是**此刻已累积正文**的快照：第一条 `text_delta` 立刻放行，节流窗口内的后续 delta 只累积不输出，窗口过后再放行一次（单行 + 80 字符截断）。`started` / `stopped` 是相位端点，任何节流都不得吃掉。
 
+接地重试（§5.1）时同一张图会起**第二个**子代理：进度行带 `(retry)` 标记，且第一次的预览累积被清空（被丢弃的正文不得混进第二次的 `message` 预览）。
+
 颜色：`supportsColor(stdout, noColor)` 检测 + `color.bold/cyan/...`（`packages/core/src/output.ts:7`）。
 
 ### JSON
@@ -278,11 +324,11 @@ stdout NDJSON，顺序固定为 `plan` → 任意条 `progress` → `result`：
 4. `{"type":"progress",…,"stage":"stopped","outcome":"ok|error","durationMs":…,"at":…}`
 5. `{"type":"result","results":[…],"summary":{…}}`
 
-消费者按 `subagentId` 归并。**stderr 在此模式下不写进度**（避免双写）。
+消费者按 `subagentId` 归并。**stderr 在此模式下不写进度**（避免双写）。接地重试产生的第二组 progress 行带 `attempt: 2`。
 
 ## 10. Acceptance
 
-`apps/zcode-cli/packages/cli/tests/recognize-command.test.ts`（`node:test` + `node:assert/strict`）：
+`apps/zcode-cli/packages/cli/tests/recognize-command.test.ts`（`node:test` + `node:assert/strict`）；接地门的用例单独放在 `tests/recognize-grounding.test.ts`（`recognize-grounding.ts` 的判定 + `dispatchRecognizeImage` 的重试与丢弃）：
 
 | 场景 | 断言 |
 | --- | --- |
@@ -293,6 +339,7 @@ stdout NDJSON，顺序固定为 `plan` → 任意条 `progress` → `result`：
 | `--json` | 单个 `{plan,results,summary}`，stderr 为空 |
 | stream-json | 恰好两行 NDJSON，`type` 依次为 `plan` / `result` |
 | 退出码 | 缺目录 2、无图片 2、scope 错误 1、无视觉模型 1、部分失败 0、全部失败 1 |
+| 接地（§5.1） | 子代理 0 工具调用 ⇒ 第一次正文**不采纳**、强制读图重试一次；重试仍 0 ⇒ `reason: "unreadable"` 且正文不出现；读图成功 ⇒ 直接采纳、`runSubagent` 只被调一次 |
 | 并发 | `--max-concurrency 2` 时实测峰值并发为 2；结果顺序与 walker 顺序一致 |
 | 过滤 | `--image-glob` 生效、`--recursive` 生效、`--model` 覆盖默认选择 |
 
@@ -311,3 +358,7 @@ stdout NDJSON，顺序固定为 `plan` → 任意条 `progress` → `result`：
 7. **多 sub-agent 真实可观察并发**：24 个 sub-agent 的 stderr 并发是「事件驱动」，不是 OS 线程真并行。消费方按 `subagentId` 归并，不要假定行序即完成序。
 8. **`subagents.enabled=false` 的诊断粒度**：目前每张图各得一条失败，而不是命令启动时一句总诊断 —— 需要 `AgentRuntime` 暴露一个「子代理是否可用」的只读能力位，才能在派发前 fail fast。
 9. **`Read` 是否真的把图交给视觉模型**：v1 假定可行（visual-judge 范式）。若某 provider 下不成立，需要在 `SubagentRunRequest` 增加 `attachments: TurnAttachment[]` 字段直接注入图像块。
+10. **接地判据的精度**：§5.1 用「工具调用次数为 0」判未接地，漏判「只调了 `Read` 以外的工具」
+    与「`Read` 失败/读了别的路径」。更精确的判据需要「`Read` 命中指定路径且成功」的事实，
+    可从子会话事件（`tool_call_started` / `tool_call_result`）或子会话 part 取；届时把
+    `totalToolUseCount` 换成路径级证据。

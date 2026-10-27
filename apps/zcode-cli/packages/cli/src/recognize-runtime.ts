@@ -6,8 +6,15 @@ import type { ModelSelection } from "@zcode/shared/model-selection";
 import type { GlobalOptions } from "@zcode/shared-types";
 import { loadBootstrapModule } from "./bootstrap-loader.js";
 import { createImageRecognizerAgentProfile, IMAGE_RECOGNIZER_AGENT_TYPE } from "./recognize-agent.js";
+import { judgeRecognizeGrounding, RECOGNIZE_UNGROUNDED_MESSAGE } from "./recognize-grounding.js";
 import type { ImageModelCandidate } from "./recognize-model.js";
-import { buildRecognizeDispatchPrompt, parseRecognizeResult, type RecognizeMode, type RecognizeResult } from "./recognize-schema.js";
+import {
+  buildRecognizeDispatchPrompt,
+  parseRecognizeResult,
+  type RecognizeMode,
+  type RecognizeReadDirective,
+  type RecognizeResult,
+} from "./recognize-schema.js";
 import type { RecognizeProgressIdentity } from "./recognize-progress.js";
 
 /**
@@ -149,20 +156,57 @@ export interface RecognizeImageDispatch {
 }
 
 /**
- * 跑一张图：派发 `image-recognizer` 子代理 → 取回文本 → 后置解析成 `RecognizeResult`。
+ * 跑一张图：派发 `image-recognizer` 子代理 → 接地判定 → 取回文本 → 后置解析成 `RecognizeResult`。
  *
  * 任何抛出（子代理启动失败、provider 错误、`subagents.enabled=false`）都在这里被翻译成
  * failure envelope，而不是冒泡打断整批——单图失败不该影响兄弟（spec §8）。
+ *
+ * 接地门（spec §5.1）：子代理 0 次工具调用 ⇒ 它**从未读过这张图**，其正文没有图像依据，
+ * 一律丢弃；先用「强制读图」指令重试一次，仍未接地才返回 `reason: "unreadable"`。
  */
 export async function dispatchRecognizeImage(
   runtime: RecognizeRuntime,
   dispatch: RecognizeImageDispatch,
 ): Promise<RecognizeResult> {
+  const first = await runRecognizeAttempt(runtime, dispatch, "standard");
+  if (first.kind === "failed") return first.result;
+  if (first.kind === "grounded") return parseAttempt(dispatch, first.rawText);
+
+  // 未接地：第一次的正文**一律丢弃**（哪怕它是一段合法的 JSON），用强制读图指令重试一次。
+  const retry = await runRecognizeAttempt(runtime, dispatch, "strict");
+  if (retry.kind === "failed") return retry.result;
+  if (retry.kind === "grounded") return parseAttempt(dispatch, retry.rawText);
+
+  return {
+    status: "error",
+    reason: "unreadable",
+    message: RECOGNIZE_UNGROUNDED_MESSAGE,
+  };
+}
+
+/** 一次派发的结果：失败（已成形 envelope）/ 未接地 / 已接地。 */
+type RecognizeAttempt =
+  | { kind: "failed"; result: RecognizeResult }
+  | { kind: "ungrounded" }
+  | { kind: "grounded"; rawText: string };
+
+/**
+ * 派发一次子代理并做接地判定。
+ *
+ * 接地判据是 `totalToolUseCount`：`image-recognizer` profile 只挂 `Read` 一个工具
+ * （`recognize-agent.ts`），所以「0 次工具调用」= 模型从未读过这张图。
+ */
+async function runRecognizeAttempt(
+  runtime: RecognizeRuntime,
+  dispatch: RecognizeImageDispatch,
+  readDirective: RecognizeReadDirective,
+): Promise<RecognizeAttempt> {
   const { prompt } = buildRecognizeDispatchPrompt({
     imagePath: dispatch.imagePath,
     mode: dispatch.mode,
     fields: dispatch.fields,
     questions: dispatch.questions,
+    readDirective,
   });
 
   let output: AgentOutput;
@@ -195,22 +239,38 @@ export async function dispatchRecognizeImage(
     );
   } catch (error) {
     return {
-      status: "error",
-      reason: "other",
-      message: error instanceof Error ? error.message : String(error),
+      kind: "failed",
+      result: {
+        status: "error",
+        reason: "other",
+        message: error instanceof Error ? error.message : String(error),
+      },
     };
   }
 
   if (output.status !== "completed") {
     return {
-      status: "error",
-      reason: "other",
-      message: `subagent did not complete in the foreground (status: ${output.status})`,
+      kind: "failed",
+      result: {
+        status: "error",
+        reason: "other",
+        message: `subagent did not complete in the foreground (status: ${output.status})`,
+      },
     };
   }
 
+  const verdict = judgeRecognizeGrounding({ totalToolUseCount: output.totalToolUseCount });
+  if (!verdict.grounded) {
+    return { kind: "ungrounded" };
+  }
+
+  return { kind: "grounded", rawText: output.content.map((block) => block.text).join("\n") };
+}
+
+/** 把已接地子代理的正文解析成结果（schema/空文本等归类在这一层）。 */
+function parseAttempt(dispatch: RecognizeImageDispatch, rawText: string): RecognizeResult {
   return parseRecognizeResult({
-    rawText: output.content.map((block) => block.text).join("\n"),
+    rawText,
     mode: dispatch.mode,
     fields: dispatch.fields,
     questions: dispatch.questions,

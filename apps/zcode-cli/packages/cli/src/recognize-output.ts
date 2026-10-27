@@ -56,6 +56,8 @@ interface RecognizeProgressStreamLine {
   outcome?: "ok" | "error";
   durationMs?: number;
   error?: string;
+  /** 第几次派发（接地重试会 >1，见 spec §5.1）。 */
+  attempt?: number;
 }
 
 export function progressStreamLine(line: RecognizeProgressLine, at: number): JsonValue {
@@ -70,6 +72,7 @@ export function progressStreamLine(line: RecognizeProgressLine, at: number): Jso
     ...(line.outcome === undefined ? {} : { outcome: line.outcome }),
     ...(line.durationMs === undefined ? {} : { durationMs: line.durationMs }),
     ...(line.error === undefined ? {} : { error: line.error }),
+    ...(line.attempt === undefined ? {} : { attempt: line.attempt }),
   };
   return payload as unknown as JsonValue;
 }
