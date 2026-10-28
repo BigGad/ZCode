@@ -12,6 +12,7 @@
     "./model-selection": "./src/model-selection.ts",
     "./account-provider-state": "./src/account-provider-state.ts",
     "./model-config": "./src/model-config.ts",
+    "./memo-v30": "./src/memo-v30/index.ts",
     "./config-schema": "./src/config-schema.ts",
     "./node": "./src/node.ts",
     "./zcodeEndpoint": "./src/zcodeEndpoint.ts",

@@ -1,7 +1,7 @@
 {
   "$id": "https://lvxiaoxia.local/schemas/v30-memo-document.schema.json",
   "title": "v3.0 案卷笔录（单卷）",
-  "description": "v3.0 案卷笔录的 JSON 数据源（阅卷笔录输出格式标准 v3.0 §七）。Word 只是这份 JSON 的渲染结果 —— 同一份 JSON 渲染出的 Word 必须完全一致。【怎么用】结构部分照它写校验代码；x-v30-cross-field-constraints（CF-01~08）必须逐条实现 —— JSON Schema 表达不了跨字段规则，只照结构实现会被整卷拒。",
+  "description": "v3.0 案卷笔录的 JSON 数据源（阅卷笔录输出格式标准 v3.0 §七）。Word 只是这份 JSON 的渲染结果 —— 同一份 JSON 渲染出的 Word 必须完全一致。【怎么用】结构部分照它写校验代码；x-v30-cross-field-constraints（CF-01~08）必须逐条实现 —— JSON Schema 表达不了跨字段规则，只照结构实现会被整卷拒。x-v30-cross-field-checks 是同一批规则的机器可读形式（校验器按 kind 求值；hard=false 只记不拒）；x-v30-disclosure-reasons 是披露原因的闭集。",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
@@ -244,6 +244,65 @@
         ],
         "additionalProperties": false
       }
+    },
+    "disclosures": {
+      "type": "array",
+      "description": "如实披露：降级 / 未核验的事实。**唯一的披露通道** —— 不写这里 = 宿主无从披露（红线 G7：不静默）。可选：没有降级事实时整个字段不出现。",
+      "items": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "description": "逐件披露时指向那一条 evidence 的 seq。**省略 = 卷级披露**（如「整卷目录不可信」）。"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "model_unavailable",
+              "model_invalid",
+              "reask_exhausted",
+              "citation_missing",
+              "number_gate_failed",
+              "wordlist_hit",
+              "catalog_unparsed",
+              "catalog_empty",
+              "catalog_title_unverified",
+              "boundary_missing"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "minLength": 1,
+            "description": "人读的中文说明（可选）。"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "reason": {
+                  "const": "catalog_title_unverified"
+                }
+              },
+              "required": [
+                "reason"
+              ]
+            },
+            "then": {
+              "required": [
+                "seq"
+              ],
+              "description": "题名未核验是**逐件**事实 → 必须带 seq（否则宿主无从标出是哪一件没核验）。"
+            }
+          }
+        ]
+      }
     }
   },
   "required": [
@@ -303,6 +362,67 @@
       "error": "整条 evidence 判 schema_mismatch"
     }
   ],
+  "x-v30-cross-field-checks": [
+    {
+      "id": "CF-01",
+      "kind": "output_mode_by_type",
+      "hard": true
+    },
+    {
+      "id": "CF-02",
+      "kind": "required_meta",
+      "hard": true
+    },
+    {
+      "id": "CF-03",
+      "kind": "no_empty_meta_value",
+      "hard": true
+    },
+    {
+      "id": "CF-04",
+      "kind": "group_only_when",
+      "when": {
+        "output_mode": "month_digest"
+      },
+      "hard": true
+    },
+    {
+      "id": "CF-05",
+      "kind": "field_only_when",
+      "field": "deleted",
+      "when": {
+        "type": "言词证据"
+      },
+      "hard": true
+    },
+    {
+      "id": "CF-06",
+      "kind": "catalog_evidence_1to1",
+      "hard": true
+    },
+    {
+      "id": "CF-07",
+      "kind": "group_seqs_exist",
+      "hard": true
+    },
+    {
+      "id": "CF-08",
+      "kind": "replica_body_empty",
+      "hard": false
+    }
+  ],
+  "x-v30-disclosure-reasons": [
+    "model_unavailable",
+    "model_invalid",
+    "reask_exhausted",
+    "citation_missing",
+    "number_gate_failed",
+    "wordlist_hit",
+    "catalog_unparsed",
+    "catalog_empty",
+    "catalog_title_unverified",
+    "boundary_missing"
+  ],
   "x-v30-output-mode-by-type": {
     "言词证据": "replica",
     "鉴定意见": "replica",
@@ -352,7 +472,8 @@
   "x-v30-engine-only-notes": [
     "`output_mode === \"replica\"` 的 `body` → 引擎给 `[]`，**宿主**用逐页转写原文拼装后再渲染（1:1 不经模型改写）",
     "引擎**要**产出 `deleted` 标签与 `group`（月份组）——它们是归组结果的一部分",
-    "引擎**照抄**输入里的 `case` / `volume`（不自己编案件信息）"
+    "引擎**照抄**输入里的 `case` / `volume`（不自己编案件信息）",
+    "引擎**要**产出 `disclosures`（降级 / 未核验的事实）—— 宿主据此如实披露（**不写 = 无从披露**）"
   ],
   "x-v30-minimal-example": {
     "case": {

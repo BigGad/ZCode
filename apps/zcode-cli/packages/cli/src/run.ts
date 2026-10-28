@@ -20,6 +20,7 @@ import { runCommandsCommand } from "./commands-command.js";
 import { runProvidersCommand } from "./providers-command.js";
 import { resolveCliCwd } from "./cwd.js";
 import { runLoginCommand, runLogoutCommand } from "./login-command.js";
+import { runMemoCommand } from "./memo-command.js";
 import { runUsageCommand } from "./usage-command.js";
 import { runRecognizeCommand } from "./recognize-command.js";
 import { runStreamCommand } from "./stream-command.js";
@@ -624,6 +625,10 @@ export const run = async (ctx: RunContext, deps: RunDependencies = {}): Promise<
       );
     case "logout":
       return await runLogoutCommand(ctx, options, commandDeps);
+    case "memo":
+      return await runMemoCommand(ctx, options, parsed.positionals.slice(1), {
+        workingDirectory,
+      });
     case "commands":
       return await runCommandsCommand(ctx, options, commandDeps, parsed.positionals.slice(1));
     case "plugin":
