@@ -1,0 +1,405 @@
+{
+  "$id": "https://lvxiaoxia.local/schemas/v30-memo-document.schema.json",
+  "title": "v3.0 案卷笔录（单卷）",
+  "description": "v3.0 案卷笔录的 JSON 数据源（阅卷笔录输出格式标准 v3.0 §七）。Word 只是这份 JSON 的渲染结果 —— 同一份 JSON 渲染出的 Word 必须完全一致。【怎么用】结构部分照它写校验代码；x-v30-cross-field-constraints（CF-01~08）必须逐条实现 —— JSON Schema 表达不了跨字段规则，只照结构实现会被整卷拒。",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "case": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "case_no": {
+          "type": "string",
+          "minLength": 1
+        },
+        "volumes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "name",
+        "volumes"
+      ],
+      "additionalProperties": false
+    },
+    "volume": {
+      "type": "object",
+      "properties": {
+        "no": {
+          "type": "string",
+          "minLength": 1
+        },
+        "theme": {
+          "type": "string",
+          "minLength": 1
+        },
+        "page_total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "no",
+        "theme",
+        "page_total"
+      ],
+      "additionalProperties": false
+    },
+    "catalog": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "item"
+              },
+              "seq": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "page_ref": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^【卷\\d{2}·第\\d+(-\\d+)?页(起)?】$"
+              }
+            },
+            "required": [
+              "kind",
+              "seq",
+              "title",
+              "page_ref"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "group"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "page_ref": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^【卷\\d{2}·第\\d+(-\\d+)?页(起)?】$"
+              },
+              "seqs": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "label",
+              "page_ref",
+              "seqs"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "言词证据",
+              "鉴定意见",
+              "审计报告",
+              "搜查扣押",
+              "书证",
+              "勘验检查",
+              "电子数据",
+              "银行流水",
+              "会计凭证"
+            ]
+          },
+          "output_mode": {
+            "type": "string",
+            "enum": [
+              "replica",
+              "digest",
+              "digest_excel",
+              "month_digest"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "page_ref": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^【卷\\d{2}·第\\d+(-\\d+)?页(起)?】$"
+          },
+          "page_numbers": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "meta": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "deleted": {
+            "type": "string",
+            "minLength": 1
+          },
+          "group": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "page_ref": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^【卷\\d{2}·第\\d+(-\\d+)?页(起)?】$"
+              }
+            },
+            "required": [
+              "label",
+              "page_ref"
+            ],
+            "additionalProperties": false
+          },
+          "body": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "q",
+                    "a",
+                    "text"
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "text"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "seq",
+          "type",
+          "output_mode",
+          "title",
+          "page_ref",
+          "page_numbers",
+          "meta",
+          "body"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "case",
+    "volume",
+    "catalog",
+    "evidence"
+  ],
+  "additionalProperties": false,
+  "x-v30-cross-field-constraints": [
+    {
+      "id": "CF-01",
+      "rule": "`evidence.output_mode` 必须等于 `x-v30-output-mode-by-type[evidence.type]`",
+      "why": "v3.0 标准 §五 把每种材料钉死一种输出模式；言词证据被摘要 = 原文被改写（撞铁律③）",
+      "error": "整条 evidence 判 schema_mismatch"
+    },
+    {
+      "id": "CF-02",
+      "rule": "`evidence.meta` 必须含 `x-v30-meta-required[evidence.type]` 里的**每一个键**",
+      "why": "标准 §七：「meta 为言词证据必填，缺项标『（OCR未识别）』，不得留空」",
+      "error": "整条 evidence 判 schema_mismatch"
+    },
+    {
+      "id": "CF-03",
+      "rule": "`evidence.meta` 的**值不得为空串**（识别不出填「（OCR未识别）」）",
+      "why": "空串 = 假装识别了却没内容；红线「不编造」",
+      "error": "整条 evidence 判 schema_mismatch"
+    },
+    {
+      "id": "CF-04",
+      "rule": "`evidence.group` **只允许**出现在 `output_mode === \"month_digest\"` 的条目上",
+      "why": "月份分组是会计凭证的结构，不是所有类型都有的",
+      "error": "整条 evidence 判 schema_mismatch"
+    },
+    {
+      "id": "CF-05",
+      "rule": "`evidence.deleted` **只允许**出现在 `type === \"言词证据\"` 的条目上",
+      "why": "标准 §七：「deleted 仅言词证据使用」；给摘要型条目加它 = 交付件多出标准没有的行",
+      "error": "整条 evidence 判 schema_mismatch"
+    },
+    {
+      "id": "CF-06",
+      "rule": "`catalog` 里 `kind === \"item\"` 的条目，按出现顺序与 `evidence[]` **逐条对应**：**条数相等**，且每条的 `seq` / `title` / `page_ref` **都相同**",
+      "why": "标准 §七字段级约定：「seq 与正文标题严格一一对应，不得跳号错位」",
+      "error": "整份文档判 schema_mismatch"
+    },
+    {
+      "id": "CF-07",
+      "rule": "`catalog` 里 `kind === \"group\"` 的条目，其 `seqs[]` 里的每个 seq **必须**在 item 条目里存在",
+      "why": "月份组引用的材料必须真实存在",
+      "error": "整份文档判 schema_mismatch"
+    },
+    {
+      "id": "CF-08",
+      "rule": "**引擎产出**的 `evidence`（`output_mode === \"replica\"`）的 `body` 必须是**空数组**",
+      "why": "1:1 复刻的正文只能由宿主用转写原文拼装（不经模型改写）→ 铁律③",
+      "error": "整条 evidence 判 schema_mismatch"
+    }
+  ],
+  "x-v30-output-mode-by-type": {
+    "言词证据": "replica",
+    "鉴定意见": "replica",
+    "审计报告": "replica",
+    "搜查扣押": "digest",
+    "书证": "digest",
+    "勘验检查": "digest",
+    "电子数据": "digest",
+    "银行流水": "digest_excel",
+    "会计凭证": "month_digest"
+  },
+  "x-v30-meta-required": {
+    "言词证据": [
+      "time",
+      "place",
+      "interviewer",
+      "interviewee",
+      "recorder"
+    ],
+    "搜查扣押": [
+      "agency",
+      "subject",
+      "place",
+      "doc_no",
+      "date"
+    ],
+    "书证": [
+      "unit",
+      "cause",
+      "legal_basis",
+      "approval",
+      "filed_at"
+    ],
+    "勘验检查": [
+      "time",
+      "place",
+      "personnel",
+      "findings"
+    ],
+    "鉴定意见": [],
+    "审计报告": [],
+    "会计凭证": [],
+    "电子数据": [],
+    "银行流水": []
+  },
+  "x-v30-page-ref-pattern": "^【卷\\d{2}·第\\d+(-\\d+)?页(起)?】$",
+  "x-v30-engine-only-notes": [
+    "`output_mode === \"replica\"` 的 `body` → 引擎给 `[]`，**宿主**用逐页转写原文拼装后再渲染（1:1 不经模型改写）",
+    "引擎**要**产出 `deleted` 标签与 `group`（月份组）——它们是归组结果的一部分",
+    "引擎**照抄**输入里的 `case` / `volume`（不自己编案件信息）"
+  ],
+  "x-v30-minimal-example": {
+    "case": {
+      "name": "赵阳阳职务侵占案",
+      "case_no": "高密检刑诉受〔2026〕370785000041号",
+      "volumes": 54
+    },
+    "volume": {
+      "no": "03",
+      "theme": "笔录类",
+      "page_total": 123
+    },
+    "catalog": [
+      {
+        "kind": "item",
+        "seq": 1,
+        "title": "赵阳阳第1次讯问笔录",
+        "page_ref": "【卷03·第4-11页】"
+      }
+    ],
+    "evidence": [
+      {
+        "seq": 1,
+        "type": "言词证据",
+        "output_mode": "replica",
+        "title": "赵阳阳第1次讯问笔录",
+        "page_ref": "【卷03·第4-11页】",
+        "page_numbers": [
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        "meta": {
+          "time": "2025年10月29日09时55分至11时30分",
+          "place": "高密市公安局执法办案管理中心经济开发区分中心",
+          "interviewer": "文婷",
+          "interviewee": "赵阳阳",
+          "recorder": "张伟"
+        },
+        "deleted": "权利义务告知书、个人基本信息（含身份证号）",
+        "body": []
+      }
+    ]
+  }
+}
