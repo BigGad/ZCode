@@ -37,12 +37,14 @@
 ### Task 1: contracts — MonitorRule/MonitorAlert 契约 + audio 端口导出 + diarize 字段
 
 **Files:**
+
 - Create: `packages/contracts/src/interfaces/monitor-rule.ts`
 - Modify: `packages/contracts/src/interfaces/index.ts`（追加导出）
 - Modify: `packages/contracts/src/interfaces/audio-transcription.port.ts`（`AudioTranscriptionRequest` 加 `diarize?: boolean`）
 - Test: `packages/contracts/tests/monitor-rule.test.ts`
 
 **Interfaces:**
+
 - Produces: `MonitorRule`、`MonitorAlert`、`MonitorAlertSource`、`monitorRuleSchema`、`monitorAlertSchema`（Task 5/6/7/12/13/14 消费）；`AudioTranscriptionRequest.diarize?: boolean`（Task 3 消费）。
 
 - [ ] **Step 1: 写失败测试**
@@ -54,12 +56,33 @@ import { monitorAlertSchema, monitorRuleSchema } from "../src/interfaces/monitor
 
 describe("monitor-rule 契约", () => {
   it("规则：type 仅 transcript-keyword，keywords 非空数组，speakers 可选", () => {
-    const parsed = monitorRuleSchema.parse({ id: "r1", type: "transcript-keyword", enabled: true, keywords: ["价格"] });
+    const parsed = monitorRuleSchema.parse({
+      id: "r1",
+      type: "transcript-keyword",
+      enabled: true,
+      keywords: ["价格"],
+    });
     expect(parsed.keywords).toEqual(["价格"]);
-    expect(() => monitorRuleSchema.parse({ id: "r2", type: "transcript-keyword", enabled: true, keywords: [] })).toThrow();
+    expect(() =>
+      monitorRuleSchema.parse({
+        id: "r2",
+        type: "transcript-keyword",
+        enabled: true,
+        keywords: [],
+      }),
+    ).toThrow();
   });
   it("告警：interviewId/source/matchedKeyword/timeMs/chunkSeq/excerpt(≤200) 必填，zod 拒绝超长 excerpt", () => {
-    const alert = { ruleId: "r1", type: "transcript-keyword", interviewId: "capture-abc", source: "mic", matchedKeyword: "价格", chunkSeq: 3, timeMs: 75_000, excerpt: "x".repeat(200) };
+    const alert = {
+      ruleId: "r1",
+      type: "transcript-keyword",
+      interviewId: "capture-abc",
+      source: "mic",
+      matchedKeyword: "价格",
+      chunkSeq: 3,
+      timeMs: 75_000,
+      excerpt: "x".repeat(200),
+    };
     expect(monitorAlertSchema.parse(alert).excerpt).toHaveLength(200);
     expect(() => monitorAlertSchema.parse({ ...alert, excerpt: "x".repeat(201) })).toThrow();
     expect(() => monitorAlertSchema.parse({ ...alert, source: "screen" })).toThrow();
@@ -85,11 +108,13 @@ git commit -m "feat: monitor-rule contract and audio port exports for live inter
 ### Task 2: 转写受控配置 adapter（transcription.json）
 
 **Files:**
+
 - Create: `packages/adapters/src/config/transcription-config.adapter.ts`
 - Modify: `packages/adapters/src/config/index.ts`（按既有导出方式追加）
 - Test: `packages/adapters/tests/transcription-config.test.ts`
 
 **Interfaces:**
+
 - Produces: `TranscriptionProviderConfig { provider: "deepgram" | "openai-compatible"; apiKey: string; model?: string; language?: string; diarize: boolean; baseUrl?: string }`、`loadTranscriptionConfig(path?: string): TranscriptionProviderConfig`（缺文件抛 `TranscriptionConfigError("not_found")`）、`resolveTranscriptionConfigPath(explicitPath?: string): string`（默认 `~/.zcode/cli/transcription.json`）、`class TranscriptionConfigError extends Error { code: "not_found" | "invalid" | "io_error" }`。
 - 照抄先例：`packages/adapters/src/config/stream-config.adapter.ts`（zod schema、错误类、路径解析；不需要 write 与 0600——本文件用户手写）。
 
@@ -106,16 +131,17 @@ git commit -m "feat: monitor-rule contract and audio port exports for live inter
 ### Task 3: 云端 STT adapter
 
 **Files:**
+
 - Create: `packages/adapters/src/audio/cloud-transcription.ts`
 - Create: `packages/adapters/src/audio/index.ts`（barrel）
 - Test: `packages/adapters/tests/audio-cloud-transcription.test.ts`
 
 **Interfaces:**
+
 - Consumes: `AudioTranscriptionPort`（contracts，Task 1 已导出；`transcribe(req: AudioTranscriptionRequest): Promise<AudioTranscriptionResult>`，`AudioTranscriptionSegment { startMs; endMs; text; speaker?; confidence? }`）；`HttpClientPort`（contracts/src/interfaces，**实现前先读其方法签名**，测试 fake 按其真实接口写）；Task 2 的 `TranscriptionProviderConfig`。
 - Produces: `createCloudTranscriptionAdapter(options: { httpClientPort: HttpClientPort; config: TranscriptionProviderConfig }): AudioTranscriptionPort`。
 
 - [ ] **Step 1: 写失败测试**（fake `HttpClientPort`，无网络）：
-
   - deepgram：请求带 `Authorization: Token <key>`、`Content-Type: audio/wav`、query 含 `diarize=true`（config.diarize 为 true 时）；响应 `results.channels[0].alternatives[0].words` 按 `speaker` 标签聚段 → `segments[].speaker` 保留 provider 标签、`startMs/endMs` 来自 word 时间；`req.diarize === false` 时覆盖 config 不带 diarize 参数。
   - openai-compatible：POST `<baseUrl|https://api.openai.com/v1>/audio/transcriptions`，结果无 speaker 字段。
   - HTTP 401/429/5xx → `AudioTranscriptionPortError`，code 分别 `permission_denied` / `timeout`(含 retry-after 语义) / `transcription_failed`；**错误消息不含 apiKey**。
@@ -132,6 +158,7 @@ git commit -m "feat: monitor-rule contract and audio port exports for live inter
 ### Task 4: ffmpeg 设备采集 segmenter + 设备枚举
 
 **Files:**
+
 - Create: `packages/adapters/src/live-capture/device-argv.ts`（纯函数）
 - Create: `packages/adapters/src/live-capture/device-enumerate.ts`
 - Create: `packages/adapters/src/live-capture/node-device.ts`
@@ -139,6 +166,7 @@ git commit -m "feat: monitor-rule contract and audio port exports for live inter
 - Test: `packages/adapters/tests/live-capture-device.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ExecutionPort`（`run({ command: { mode: "argv", file, args }, timeoutMs })` 与 `start`/`cancelBackgroundTask`/`getBackgroundTask`，签名照抄 `video/ffmpeg-rtsp.ts` 用法）；`probeFfmpegAvailable`（`video/ffmpeg-frames.ts` 已导出，直接复用）。
 - Produces（Task 13 的 `deviceSegmenterFactory` 依赖）:
 
@@ -146,23 +174,38 @@ git commit -m "feat: monitor-rule contract and audio port exports for live inter
 export type DeviceCaptureSource = "mic" | "camera";
 export interface FfmpegDeviceSegmenterStartRequest {
   source: DeviceCaptureSource;
-  outDir: string;              // segment 输出目录
-  segmentSeconds: number;      // 默认 25
-  device?: string;             // 平台设备名/索引；缺省系统默认
-  platform?: NodeJS.Platform;  // 测试注入，默认 process.platform
+  outDir: string; // segment 输出目录
+  segmentSeconds: number; // 默认 25
+  device?: string; // 平台设备名/索引；缺省系统默认
+  platform?: NodeJS.Platform; // 测试注入，默认 process.platform
 }
 export interface FfmpegDeviceSegmenter {
-  start(request: FfmpegDeviceSegmenterStartRequest, options?: { signal?: AbortSignal }): Promise<void>;
+  start(
+    request: FfmpegDeviceSegmenterStartRequest,
+    options?: { signal?: AbortSignal },
+  ): Promise<void>;
   watchClosedSegments(signal: AbortSignal): AsyncIterable<{ seq: number; path: string }>;
   readSegment(path: string): Promise<Uint8Array>;
   stop(): Promise<void>;
 }
 export function createFfmpegDeviceSegmenter(options: {
-  executionPort: ExecutionPort; ffmpegPath?: string; pollIntervalMs?: number;
+  executionPort: ExecutionPort;
+  ffmpegPath?: string;
+  pollIntervalMs?: number;
 }): FfmpegDeviceSegmenter;
-export function buildDeviceCaptureArgv(platform: NodeJS.Platform, source: DeviceCaptureSource, req: { outDir: string; segmentSeconds: number; device?: string }): string[];
-export async function enumerateMediaDevices(executionPort: ExecutionPort, ffmpegPath?: string): Promise<{ audio: DeviceInfo[]; video: DeviceInfo[] }>;
-export interface DeviceInfo { id: string; name: string }
+export function buildDeviceCaptureArgv(
+  platform: NodeJS.Platform,
+  source: DeviceCaptureSource,
+  req: { outDir: string; segmentSeconds: number; device?: string },
+): string[];
+export async function enumerateMediaDevices(
+  executionPort: ExecutionPort,
+  ffmpegPath?: string,
+): Promise<{ audio: DeviceInfo[]; video: DeviceInfo[] }>;
+export interface DeviceInfo {
+  id: string;
+  name: string;
+}
 ```
 
 - [ ] **Step 1: 写失败测试**：
@@ -182,21 +225,29 @@ export interface DeviceInfo { id: string; name: string }
 ### Task 5: 规则求值器（core，纯函数）
 
 **Files:**
+
 - Create: `packages/core/src/runtime/interview/monitor-rules.ts`
 - Test: `packages/core/tests/interview-monitor-rules.test.ts`
 
 **Interfaces:**
+
 - Consumes: Task 1 的 `MonitorRule` / `MonitorAlert`。
 - Produces（Task 7 消费）:
 
 ```ts
 export interface MonitorRuleEvalInput {
-  text: string;                 // 本次新增 transcript 文本段
-  interviewId: string; source: MonitorAlertSource;
-  chunkSeq: number; timeMs: number;   // timeMs = interview t0 起
-  speakerRole?: string; speakerLabel?: string;
+  text: string; // 本次新增 transcript 文本段
+  interviewId: string;
+  source: MonitorAlertSource;
+  chunkSeq: number;
+  timeMs: number; // timeMs = interview t0 起
+  speakerRole?: string;
+  speakerLabel?: string;
 }
-export function evaluateMonitorRules(rules: readonly MonitorRule[], input: MonitorRuleEvalInput): MonitorAlert[];
+export function evaluateMonitorRules(
+  rules: readonly MonitorRule[],
+  input: MonitorRuleEvalInput,
+): MonitorAlert[];
 ```
 
 - [ ] **Step 1: 写失败测试**：命中产出 alert（excerpt ≤200 且含命中词上下文）；大小写不敏感（"Price" 命中 `keywords:["价格","price"]`）；`speakers:["对方"]` 按角色过滤、映射未固化时按原始标签命中；同 `(ruleId, chunkSeq, keyword)` 跨规则同段只出一次；**同 keyword 在不同 chunkSeq 各告警一次**（跨 chunk 不去重）；禁用规则跳过。
@@ -210,26 +261,39 @@ export function evaluateMonitorRules(rules: readonly MonitorRule[], input: Monit
 ### Task 6: 告警 JSONL store（core）
 
 **Files:**
+
 - Create: `packages/core/src/runtime/interview/alert-store.ts`
 - Test: `packages/core/tests/interview-alert-store.test.ts`
 
 **Interfaces:**
+
 - Produces（Task 7 消费）:
 
 ```ts
 export const monitorAlertRowSchema = z.object({
-  v: z.literal(1), ts: z.number(), interviewId: z.string(),
-  ruleId: z.string(), type: z.literal("transcript-keyword"),
+  v: z.literal(1),
+  ts: z.number(),
+  interviewId: z.string(),
+  ruleId: z.string(),
+  type: z.literal("transcript-keyword"),
   source: z.enum(["mic", "camera", "network-stream"]),
-  matchedKeyword: z.string().max(200), chunkSeq: z.number(), timeMs: z.number(),
-  excerpt: z.string().max(200), severity: z.enum(["info", "low", "medium", "high"]).optional(),
+  matchedKeyword: z.string().max(200),
+  chunkSeq: z.number(),
+  timeMs: z.number(),
+  excerpt: z.string().max(200),
+  severity: z.enum(["info", "low", "medium", "high"]).optional(),
 });
 export interface MonitorAlertStore {
   append(input: MonitorAlert): Promise<{ row: z.infer<typeof monitorAlertRowSchema> }>;
   query(q?: { since?: number; limit?: number }): Promise<z.infer<typeof monitorAlertRowSchema>[]>;
   pruneExpired(now: number): Promise<number>;
 }
-export function createMonitorAlertStore(options: { alertStoreDir: string; interviewId: string; clock?: () => number; logger?: ServiceLogger }): MonitorAlertStore;
+export function createMonitorAlertStore(options: {
+  alertStoreDir: string;
+  interviewId: string;
+  clock?: () => number;
+  logger?: ServiceLogger;
+}): MonitorAlertStore;
 ```
 
 - [ ] **Step 1: 写失败测试**：append 写 `<alertStoreDir>/<interviewId>.jsonl` 且每行过 zod；坏行跳过不抛（照抄 stream alert-store 容错）；query `since` 过滤 + limit；`pruneExpired` 清 30 天前行（`STREAM_ALERT_RETENTION_DAYS = 30` 同值常量）；append 无去重（去重是 Task 5/7 的职责）。
@@ -243,20 +307,27 @@ export function createMonitorAlertStore(options: { alertStoreDir: string; interv
 ### Task 7: interview session（mic 转写管线 + 状态）
 
 **Files:**
+
 - Create: `packages/core/src/runtime/interview/interview-state.ts`
 - Create: `packages/core/src/runtime/interview/interview-session.ts`（本任务只实现 mic 侧；camera 在 Task 8）
 - Modify: `packages/core/src/index.ts`（barrel 追加 interview 导出）
 - Test: `packages/core/tests/interview-session-transcript.test.ts`
 
 **Interfaces:**
+
 - Consumes: `StreamMonitorCapture`（`core/src/runtime/stream-monitor/monitor-loop.ts` 已导出的接口，形状见下）、Task 1/5/6 产物、`WorkspaceResourceIndexPort`（`upsert`/`addVariant`/`getById`）、`ToolArtifactStorePort.writeToolResultBinaryArtifact`、`AudioTranscriptionPort`。
 - Produces:
 
 ```ts
-export interface InterviewInfo { id: string; title?: string; t0: number; sources: { mic: boolean; camera: boolean } }
+export interface InterviewInfo {
+  id: string;
+  title?: string;
+  t0: number;
+  sources: { mic: boolean; camera: boolean };
+}
 export interface InterviewSessionDeps {
   interview: InterviewInfo;
-  micCapture?: StreamMonitorCapture;    // { start, watchClosedSegments, readSegment, stop }
+  micCapture?: StreamMonitorCapture; // { start, watchClosedSegments, readSegment, stop }
   cameraCapture?: StreamMonitorCapture; // Task 8 消费
   transcriptionPort?: AudioTranscriptionPort;
   rules: MonitorRule[];
@@ -264,15 +335,21 @@ export interface InterviewSessionDeps {
   workspaceResourceIndexPort: WorkspaceResourceIndexPort;
   artifactStore?: ToolArtifactStorePort;
   stateDir: string;
-  runDigestTurn?(req: { prompt: string; imageDataUrls: string[]; signal?: AbortSignal }): Promise<string>; // Task 9
-  emitEvent?(event: { type: SessionEventType; payload: unknown; traceId: string }): void;                  // Task 11
+  runDigestTurn?(req: {
+    prompt: string;
+    imageDataUrls: string[];
+    signal?: AbortSignal;
+  }): Promise<string>; // Task 9
+  emitEvent?(event: { type: SessionEventType; payload: unknown; traceId: string }): void; // Task 11
   onAlert?(alert: MonitorAlert): void;
-  logger?: ServiceLogger; clock?: () => number;
+  logger?: ServiceLogger;
+  clock?: () => number;
 }
 export interface InterviewSession {
   run(signal: AbortSignal): Promise<{ stoppedReason: "aborted" | "stream_down" | "completed" }>;
-  getTranscriptText(): string;        // 已追加 transcript 原文（Task 10/12 消费）
-  getRules(): readonly MonitorRule[]; setRules(rules: readonly MonitorRule[]): void;
+  getTranscriptText(): string; // 已追加 transcript 原文（Task 10/12 消费）
+  getRules(): readonly MonitorRule[];
+  setRules(rules: readonly MonitorRule[]): void;
 }
 export function createInterviewSession(deps: InterviewSessionDeps): InterviewSession;
 export function interviewTranscriptEntryId(interviewId: string): string; // `capture-<id>-transcript`
@@ -297,10 +374,12 @@ export function interviewAudioEntryId(interviewId: string, seq: number): string;
 ### Task 8: interview session（camera 抽帧管线 + 单路失败终止）
 
 **Files:**
+
 - Modify: `packages/core/src/runtime/interview/interview-session.ts`
 - Test: `packages/core/tests/interview-session-frames.test.ts`
 
 **Interfaces:**
+
 - Consumes: `VideoFramePort.extractFrames({ videoRef, mime, timesMs })` → `{ frames: VideoFrame[] }`（`VideoFrame { timeMs; imageDataUrl; width; height }`）；`ImageProcessorPort.prepareForModel`（签名照抄 `stream-monitor/segment-pipeline.ts` 用法：预算 5MiB base64/单帧、40MiB 聚合，剥离即丢弃）。
 
 - [ ] **Step 1: 写失败测试**：
@@ -319,20 +398,43 @@ export function interviewAudioEntryId(interviewId: string, seq: number): string;
 ### Task 9: digest 消化与角色映射（core）
 
 **Files:**
+
 - Create: `packages/core/src/runtime/interview/digest.ts`
 - Modify: `packages/core/src/runtime/interview/interview-session.ts`（暴露 `digestPending(): Promise<void>`）
 - Test: `packages/core/tests/interview-digest.test.ts`
 
 **Interfaces:**
+
 - Produces:
 
 ```ts
 export const DIGEST_WINDOW_MS = 600_000;
-export interface DigestNote { startMs: number; endMs: number; highlights: string[]; expressionObservations: string[]; }
-export function buildDigestPrompt(input: { startMs: number; endMs: number; transcriptText: string; priorNotesSummary: string; fixedSpeakerMap: Record<string, string> }): string;
-export function parseDigestResponse(response: string, input: { startMs: number; endMs: number }): DigestNote;  // JSON 解析失败 → 仅 highlights 含原文截断的降级笔记
-export function loadSpeakerMap(stateDir: string, interviewId: string): Promise<Record<string, string>>;
-export function saveSpeakerMap(stateDir: string, interviewId: string, map: Record<string, string>): Promise<void>;  // tmp+rename
+export interface DigestNote {
+  startMs: number;
+  endMs: number;
+  highlights: string[];
+  expressionObservations: string[];
+}
+export function buildDigestPrompt(input: {
+  startMs: number;
+  endMs: number;
+  transcriptText: string;
+  priorNotesSummary: string;
+  fixedSpeakerMap: Record<string, string>;
+}): string;
+export function parseDigestResponse(
+  response: string,
+  input: { startMs: number; endMs: number },
+): DigestNote; // JSON 解析失败 → 仅 highlights 含原文截断的降级笔记
+export function loadSpeakerMap(
+  stateDir: string,
+  interviewId: string,
+): Promise<Record<string, string>>;
+export function saveSpeakerMap(
+  stateDir: string,
+  interviewId: string,
+  map: Record<string, string>,
+): Promise<void>; // tmp+rename
 ```
 
 - [ ] **Step 1: 写失败测试**：transcript 按 10 分钟窗口切分；`digestPending()` 调 `runDigestTurn` 并把笔记以 `addVariant` 追加到 entry `capture-<id>-notes`（kind `"transcript"`、variant kind `"transcript"`、meta `noteStartMs/noteEndMs`）；**speaker map 固化**：响应含 `speakerMap` 时 `saveSpeakerMap` 且后续 prompt 的 `fixedSpeakerMap` 使用它；用户显式 map（`setSpeakerMap`）覆盖推断；cursor（`lastDigestedMicSeq`）推进后重跑不重复消化；主模型返回垃圾时降级笔记不抛错。
@@ -346,16 +448,22 @@ export function saveSpeakerMap(stateDir: string, interviewId: string, map: Recor
 ### Task 10: 提问上下文注入（core）
 
 **Files:**
+
 - Create: `packages/core/src/runtime/interview/prompt-injection.ts`
 - Modify: `packages/core/src/runtime/helpers/conversation.ts`（注入点：**先读该文件**找到最新 user message 物化处）
 - Test: `packages/core/tests/interview-prompt-injection.test.ts`
 
 **Interfaces:**
+
 - Produces:
 
 ```ts
 export const CAPTURE_CONTEXT_BOUNDARY = "<interview-context>";
-export function buildCaptureContextBlock(input: { interviewTitle?: string; notesText: string; undigestedTranscript: string; }): string;
+export function buildCaptureContextBlock(input: {
+  interviewTitle?: string;
+  notesText: string;
+  undigestedTranscript: string;
+}): string;
 // 返回 `${CAPTURE_CONTEXT_BOUNDARY}\n…notes…\n…undigested…\n</interview-context>`；
 // undigestedTranscript 为空时省略该小节；notes 为空且无未消化段时返回 ""（不注入）。
 ```
@@ -371,6 +479,7 @@ export function buildCaptureContextBlock(input: { interviewTitle?: string; notes
 ### Task 11: MonitorAlertRaised 事件全链路
 
 **Files:**
+
 - Modify: `packages/contracts/src/events/session.events.ts`（枚举 + payload + union）
 - Modify: `packages/bootstrap/src/zcode-protocol-v4/cold-event-merge.ts`（`MEMORY_ONLY_EVENT_TYPES` 与 `LIVE_ONLY_EVENT_TYPES` 各加 `SessionEventType.MonitorAlertRaised`）
 - Modify: `packages/bootstrap/src/zcode-protocol-v4/product-projection.ts`（新 case → op `capture.alertRaised`，payload 原样透传）
@@ -378,6 +487,7 @@ export function buildCaptureContextBlock(input: { interviewTitle?: string; notes
 - Test: `packages/contracts/tests/event-reducer.test.ts`（追加 case）、`packages/bootstrap/tests/monitor-alert-projection.test.ts`（新建）
 
 **Interfaces:**
+
 - Produces: `SessionEventType.MonitorAlertRaised = "monitor_alert_raised"`；`MonitorAlertRaisedPayload = { interviewId: string; ruleId: string; type: "transcript-keyword"; source: "mic" | "camera" | "network-stream"; matchedKeyword: string; chunkSeq: number; timeMs: number; excerpt: string }`。发射方（Task 7）以 `sequenceNumber: 0` 构造（live-only 先例：`PluginUiResourceUpdated`）。
 
 - [ ] **Step 1: 写失败测试**：contracts——枚举与 payload union 成员存在、reducer 忽略不崩；bootstrap——`ingest` 一个 `MonitorAlertRaised`（seq 0）→ 投影产出 `capture.alertRaised` op；cold hydration 不产出该事件（LIVE_ONLY）；TUI——`applySessionEventToState` 收到该事件产生 notice 文本、未知事件仍静默忽略。
@@ -393,6 +503,7 @@ export function buildCaptureContextBlock(input: { interviewTitle?: string; notes
 > 前置：按 AGENTS.md 先阅读 `docs/design/v2/tool/00-tool-change-chain.md`，本任务落地时同步更新该文档的链路登记。
 
 **Files:**
+
 - Create: `packages/contracts/src/tools/capture-frames.ts`
 - Create: `packages/core/src/tool/handlers/capture-frames.ts`
 - Modify: `packages/core/src/tool/handlers/index.ts`（`builtInTools` 追加 + `registerBuiltInTools` 选项 `includeCaptureTools?: boolean` 门控）
@@ -402,6 +513,7 @@ export function buildCaptureContextBlock(input: { interviewTitle?: string; notes
 - Test: `packages/core/tests/capture-frames-tool.test.ts`
 
 **Interfaces:**
+
 - Consumes: `VideoFrame`（contracts）；runtime 注入的查询函数。
 - Produces:
 
@@ -416,14 +528,32 @@ export const CaptureFramesInputSchema = z.object({
 export type CaptureFramesInput = z.infer<typeof CaptureFramesInputSchema>;
 export const CaptureFramesOutputSchema = z.object({
   interviewId: z.string(),
-  frames: z.array(z.object({ timeMs: z.number(), imageDataUrl: z.string(), width: z.number(), height: z.number() })),
+  frames: z.array(
+    z.object({
+      timeMs: z.number(),
+      imageDataUrl: z.string(),
+      width: z.number(),
+      height: z.number(),
+    }),
+  ),
 });
-export const CaptureFramesErrorCode = ["capture_not_found", "capture_inactive", ...共享错误码] as const;
+export const CaptureFramesErrorCode = [
+  "capture_not_found",
+  "capture_inactive",
+  ...共享错误码,
+] as const;
 
 // core/src/runtime/types.ts
 export interface InterviewFrameLookup {
-  (req: { interviewId: string; sinceMs?: number; untilMs?: number; limit: number }):
-    Promise<{ interviewId: string; frames: { timeMs: number; imageDataUrl: string; width: number; height: number }[] }>;
+  (req: {
+    interviewId: string;
+    sinceMs?: number;
+    untilMs?: number;
+    limit: number;
+  }): Promise<{
+    interviewId: string;
+    frames: { timeMs: number; imageDataUrl: string; width: number; height: number }[];
+  }>;
 }
 ```
 
@@ -438,6 +568,7 @@ export interface InterviewFrameLookup {
 ### Task 13: runtime interview 方法 + 端口装配
 
 **Files:**
+
 - Modify: `packages/core/src/runtime/types.ts`（Deps 加 `transcriptionPort?: AudioTranscriptionPort`、`deviceSegmenterFactory?: (req: { source: DeviceCaptureSource; outDir: string; segmentSeconds: number; device?: string }) => DeviceSegmenterCap`）
 - Create: `packages/core/src/runtime/methods/interview.ts`
 - Modify: `packages/core/src/runtime/internal-methods.ts` + `agent-runtime.ts`（方法挂载与 deps 存储）
@@ -445,6 +576,7 @@ export interface InterviewFrameLookup {
 - Test: `packages/core/tests/runtime-interview-methods.test.ts`、`packages/bootstrap/tests/interview-port-wiring.test.ts`
 
 **Interfaces:**
+
 - Produces（Task 14 的 `CommandCenterApp` 能力消费）:
 
 ```ts
@@ -468,6 +600,7 @@ listInterviewAlerts(options?: { since?: number }): Promise<MonitorAlertRow[]>;
 ### Task 14: /capture 命令族 + facade + help
 
 **Files:**
+
 - Modify: `packages/cli/src/command-center/slash-command-types.ts`（union 加 `capture` 成员）
 - Modify: `packages/cli/src/command-center/slash-commands.ts`（`rawName === "capture"` 分支）
 - Create: `packages/cli/src/command-center/handlers/capture.ts`
@@ -478,6 +611,7 @@ listInterviewAlerts(options?: { since?: number }): Promise<MonitorAlertRow[]>;
 - Test: `packages/cli/tests/command-center-capture.test.ts`（若 cli 包现有命令测试在别处，跟随其位置与风格）
 
 **Interfaces:**
+
 - Consumes: Task 13 的 runtime 方法（经 facade）。
 - Produces: `handleCaptureCommand(args: string, deps: CommandCenterDeps): Promise<TuiSubmitPromptResult>`。
 
@@ -492,6 +626,7 @@ listInterviewAlerts(options?: { since?: number }): Promise<MonitorAlertRow[]>;
 ### Task 15: resource policy capture 节 + E2E 实机验证
 
 **Files:**
+
 - Modify: resource-policy 解析器（**先定位**：`grep -rn "resource-policy\|policyTag" packages/adapters/src packages/core/src`，找到 `resource-policy.yaml` 的 zod/parser，追加 `policy.capture`：`{ framesPerChunk: int 1..8 default 3; chunkDurationMs: int 10_000..60_000 default 25_000 }`）
 - Modify: Task 7/8 的帧数与段长常量改为读 policy（缺省值不变）
 - Modify: `docs/design/v2/live-interview.md`（末尾「Windows/Linux 实机验证结果 / 剩余风险」小节）

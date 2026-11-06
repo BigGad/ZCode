@@ -318,7 +318,7 @@ describe("Read PDF handling", () => {
     ).rejects.toBe(inspectionError);
   });
 
-  it("treats an undefined PDF capability in the current turn snapshot as unsupported", async () => {
+  it("reads PDF-disabled current turn input as text", async () => {
     const context = contextWith({});
     context.model = createTestRuntimeModel({
       generateText: async () => ({ finishReason: "stop", text: "", usage: {} }),

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { resolvePath } from "@zcode/adapters/config";
 import { createNodeExecutionAdapter } from "@zcode/adapters/exec";
 import { createNodeFileSystemAdapter } from "@zcode/adapters/fs";
@@ -21,8 +22,12 @@ import type {
   SessionMailboxPort,
   WorkspaceResourceIndexPort,
 } from "@zcode/contracts";
-import type { AgentRuntimeConfig } from "@zcode/core";
+import { createSessionEvent, SessionEventType, type SessionId, type TraceContext } from "@zcode/contracts";
+import type { AgentRuntime, AgentRuntimeConfig } from "@zcode/core";
 import type { ConfigResult } from "@zcode/adapters/config";
+import { createWorkspaceMcpTrust } from "../workspace-mcp-trust/index.js";
+import { withOfficialCommandEnv } from "../official-command-endpoint/index.js";
+import { resolveMcpNodeFallbackProvider } from "./mcp-node-fallback.js";
 import { isMessageEnabled } from "./app-config-options.js";
 import type { ZCodeAppOptions } from "./types.js";
 
@@ -37,9 +42,14 @@ export interface WirePortsContext {
   runtimeConfig: AgentRuntimeConfig;
   workingDirectory: string;
   storageRoot: string;
+  cliStorageRoot: string;
   appVersion: string;
   logger: Logger;
   configuredMcpServers: Record<string, unknown>;
+  sessionId: SessionId;
+  traceContext: TraceContext;
+  /** runtime 在端口装配之后才创建；端口回调只能通过它取当前实例。 */
+  resolveRuntime: () => AgentRuntime | undefined;
 }
 
 export interface WiredPorts {
@@ -63,8 +73,12 @@ export function wirePorts(context: WirePortsContext): WiredPorts {
     runtimeConfig,
     workingDirectory,
     storageRoot,
+    cliStorageRoot,
     appVersion,
     logger,
+    sessionId,
+    traceContext,
+    resolveRuntime,
   } = context;
   const env = options.env ?? process.env;
 
@@ -79,7 +93,7 @@ export function wirePorts(context: WirePortsContext): WiredPorts {
         })
       : undefined);
 
-  const mcpPort =
+  const rawMcpPort =
     options.mcpPort ??
     (runtimeConfig.mcp?.enabled === false
       ? undefined
@@ -93,11 +107,36 @@ export function wirePorts(context: WirePortsContext): WiredPorts {
             noProxy: configResult.config.network.noProxy,
             caCertFile: configResult.config.network.caCertFile,
           },
+          nodeFallback: resolveMcpNodeFallbackProvider({ cliStorageRoot, logger }),
           workingDirectory,
         })));
+  // workspace 级 MCP 信任：未准入的 server 必须在端口边界被挡住，不能进入运行时。
+  const mcpPort = rawMcpPort
+    ? createWorkspaceMcpTrust({
+        workingDirectory,
+        workspaceIdentity: options.runtimeConfig?.memory?.workspaceIdentity,
+        userConfigPath: options.userConfigPath,
+        projectConfigPath: options.projectConfigPath,
+        skipUserConfig: options.skipUserConfig,
+        env: options.env,
+        onAdmissionChanged: async (payload) => {
+          const runtime = resolveRuntime();
+          if (!runtime) return;
+          await runtime.appendEvent(
+            createSessionEvent(
+              SessionEventType.WorkspaceMcpAdmissionUpdated,
+              sessionId,
+              payload,
+              { traceId: traceContext.traceId },
+            ),
+            traceContext,
+          );
+        },
+      }).guard(rawMcpPort)
+    : undefined;
   const ownsMcpPort = options.mcpPort === undefined && mcpPort !== undefined;
 
-  const executionPort =
+  const baseExecutionPort =
     options.executionPort ??
     createNodeExecutionAdapter({
       onToolExecResource: options.onToolExecResource,
@@ -107,8 +146,23 @@ export function wirePorts(context: WirePortsContext): WiredPorts {
         caCertFile: configResult.config.network.caCertFile,
       },
       outputRootDir: join(storageRoot, "cli", "exec"),
+      bashOutputTempDir: tmpdir(),
       processEnv: env,
     });
+  // 本 app 只服务一个 session：它的子进程统一带上这个 session 的官方命令端点 env。
+  const officialCommandEnv = options.officialCommandEnv;
+  const officialCommandIdentity = options.runtimeConfig?.memory?.workspaceIdentity;
+  const officialCommandWorkspace = {
+    workspacePath: workingDirectory,
+    ...(officialCommandIdentity ? { workspaceIdentity: officialCommandIdentity } : {}),
+  };
+  const executionPort = officialCommandEnv
+    ? withOfficialCommandEnv(
+        baseExecutionPort,
+        () => officialCommandEnv(sessionId, officialCommandWorkspace),
+        logger,
+      )
+    : baseExecutionPort;
   const ownsExecutionPort = options.executionPort === undefined;
 
   const pdfDocumentPort =
