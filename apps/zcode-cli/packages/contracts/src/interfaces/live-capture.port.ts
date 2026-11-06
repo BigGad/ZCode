@@ -1,6 +1,6 @@
 import type { TraceContext } from "../tracing/tracer.js";
 
-/** live capture 来源；`network-stream` 为 2026-10-16 增补（RTSP，ffmpeg adapter 承载）。 */
+/** live capture 来源；`network-stream` 为 2026-10-16 增补（网络流采集，方案待重做）。 */
 export type LiveCaptureSource =
   | "mic"
   | "camera"
@@ -29,9 +29,8 @@ export interface LiveCaptureConstraints {
   };
   networkStream?: {
     /**
-     * URL 不在本契约中：凭据由受控配置（~/.zcode/cli/streams.json，0600）持有，
-     * adapter 在 spawn 时经窄接口取用；日志 / 事件 / prompt 只允许脱敏 URL
-     * （stream-input.md 凭据管理节）。
+     * URL 不在本契约中：凭据由受控配置持有，adapter 在 spawn 时经窄接口取用；
+     * 日志 / 事件 / prompt 只允许脱敏 URL（stream-input.md 凭据管理节）。
      */
     transport?: "tcp" | "udp";
     segmentSeconds?: number;

@@ -20,8 +20,10 @@ export interface UsageCommandOptions {
 }
 
 /** 命令实际依赖的 store 切面；真实 SqliteSessionStore 与测试注入都满足它。 */
+// Awaited：上游把 createSqliteSessionStore 改成异步打开（返回 Promise），
+// 这里必须取解包后的 store 类型，否则 Pick 落在 Promise 上取不到方法。
 type UsageStoreHandle = Pick<
-  ReturnType<typeof createSqliteSessionStore>,
+  Awaited<ReturnType<typeof createSqliteSessionStore>>,
   | "close"
   | "queryModelUsageRecords"
   | "queryToolUsageRecords"
@@ -32,7 +34,7 @@ type UsageStoreHandle = Pick<
 
 /** 测试注入点：默认打开真实默认路径的 SqliteSessionStore。 */
 export interface UsageCommandDependencies {
-  createSessionStore?: () => UsageStoreHandle;
+  createSessionStore?: () => UsageStoreHandle | Promise<UsageStoreHandle>;
 }
 
 /**
@@ -62,7 +64,8 @@ export async function runUsageCommand(
     since = now - DEFAULT_WINDOW_DAYS * DAY_MS;
   }
 
-  const store = deps.createSessionStore?.() ?? createSqliteSessionStore();
+  // await：store 打开是异步的（见 UsageStoreHandle 的 Awaited 说明）。
+  const store = await (deps.createSessionStore?.() ?? createSqliteSessionStore());
   try {
     if (usageOptions.sessions) {
       return await exportSessionList(ctx, options, store, { since, until });

@@ -379,9 +379,9 @@ export interface AgentRuntimeDeps {
   /** CLI 无头注入的全局 PDF 密码（--pdf-password）；仅密码装饰器消费，不落盘不进日志。 */
   pdfPassword?: string;
   workspaceResourceIndexPort?: WorkspaceResourceIndexPort;
-  /** 网络流（RTSP 等）live capture 端口；CLI stream 监控链路消费。 */
+  /** 直播采集端口（mic / camera / screen 等）；音频与视频输入主线消费。 */
   liveCapturePort?: LiveCapturePort;
-  /** 视频抽帧端口；stream-monitor segment 分析与后续 video-frames 主线消费。 */
+  /** 视频抽帧端口；video-frames 主线消费。 */
   videoFramePort?: VideoFramePort;
   skillPort?: SkillPort;
   mcpPort?: McpPort;

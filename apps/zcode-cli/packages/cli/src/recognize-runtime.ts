@@ -22,7 +22,7 @@ import type { RecognizeProgressIdentity } from "./recognize-progress.js";
 /**
  * `zcode recognize` 的运行时装配（image-recognition-cli.md「State Owners」节）。
  *
- * 与 `stream-monitor-runner.ts` 同款 bootstrap 路径，但两处刻意不同：
+ * 与其它子命令同款 bootstrap 路径，但两处刻意不同：
  *  - 这里**必须**有可用的 Read 权限（子代理要读图），所以注入一个只放行 `Read` 的 broker；
  *  - `autoBackgroundMs: 0` 强制前台：本命令的契约是「跑完再聚合」，中途转后台会让结果集
  *    在打印时残缺。

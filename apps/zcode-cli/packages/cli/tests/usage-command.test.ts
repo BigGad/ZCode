@@ -36,7 +36,8 @@ interface UsageFixture {
 async function createUsageFixture(): Promise<UsageFixture> {
   const tempRoot = await mkdtemp(join(tmpdir(), "zcode-usage-command-"));
   const dbPath = join(tempRoot, "session.sqlite");
-  const store = createSqliteSessionStore({ dbPath });
+  // await：上游把 createSqliteSessionStore 改成异步打开（返回 Promise）。
+  const store = await createSqliteSessionStore({ dbPath });
   const sessionId = "sess_usage_command_fixture" as Parameters<
     typeof store.createSession
   >[0]["id"];

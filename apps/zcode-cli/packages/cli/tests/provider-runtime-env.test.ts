@@ -153,7 +153,7 @@ test("does not resolve provider assets for commands that do not run Core", async
 });
 
 test("resolves provider assets for top-level commands that create an app", async () => {
-  // 回归：`stream`/`recognize` 都要 createZCodeApp（前者跑分析 turn，后者挑视觉模型 + 跑子代理）。
+  // 回归：`recognize`/`providers` 都要 createZCodeApp（前者挑视觉模型 + 跑子代理，后者读 registry）。
   // 漏登记时 registry 拿不到配置路径，命令会在启动期以「缺少进程 Provider Registry 路径」失败。
   const root = await temporaryDirectory();
   const entrypoint = join(root, "apps/zcode-cli/packages/cli/src/main.ts");
@@ -162,7 +162,7 @@ test("resolves provider assets for top-level commands that create an app", async
   await writeFile(entrypoint, "");
   await writeFile(join(root, "config/provider/zcode-builtin.json"), EMPTY_RELEASE);
 
-  for (const argv of [["stream", "list"], ["recognize", "/tmp/photos"]]) {
+  for (const argv of [["recognize", "/tmp/photos"], ["providers", "init"]]) {
     const prepared = await prepareCliProviderRuntimeEnv({
       argv,
       dataBaseDir: join(root, "home"),

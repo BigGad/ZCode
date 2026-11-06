@@ -25,7 +25,6 @@ export const zhCN: ZCodeCopy = {
   providers  在 Personal Provider Config 里生成具名模型类型（\`providers init [--dry-run]\`）
   recognize  批量识别图片文件夹（\`recognize <folder> [--schema description|qa|structured]\`；默认并发 4，逐张派发子代理）
   skills     列出本地 skills（\`skills list\`）
-  stream     RTSP 网络流持续监控（\`stream list|analyze|watch|events\`；凭据存 ~/.zcode/cli/streams.json，告警保留 30 天）
   usage      导出 token 用量统计（默认汇总最近 7 天；--json 输出 NDJSON 明细，--session <id> 导出会话消息，--sessions 列出会话；数据保留 30 天）
   tui        打开终端 UI
   version    打印 CLI 版本

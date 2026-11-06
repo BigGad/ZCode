@@ -3073,7 +3073,9 @@ describe("SQLite session store", () => {
   it("exports model and tool usage records via the query ports", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "zcode-usage-records-"));
     const dbPath = join(tempRoot, "session.sqlite");
-    const store = createSqliteSessionStore({ dbPath });
+    // await：上游把 createSqliteSessionStore 改成异步打开（返回 Promise），
+    // 此处沿用旧的同步写法会导致 store 是 Promise、拿不到 close()。
+    const store = await createSqliteSessionStore({ dbPath });
     const sessionID = createSessionId("usage-records");
     const otherSessionID = createSessionId("usage-records-other");
     const now = Date.now();

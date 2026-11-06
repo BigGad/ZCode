@@ -3,8 +3,8 @@ import type { TraceContext } from "../tracing/tracer.js";
 /**
  * 视频抽帧端口（video-frames.md 契约落地）。
  *
- * 首发消费方是 stream-monitor（RTSP 持续监控）：segment 关段后抽帧做分析。
- * 浏览器 worker / provider 投影分支为后续阶段（见 video-frames.md 落地范围节）。
+ * 消费方是视频输入主线（浏览器 worker / provider 投影分支，见 video-frames.md
+ * 落地范围节）。
  */
 export interface VideoFrameRequest {
   /** file path 或 artifact URI */

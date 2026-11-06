@@ -489,17 +489,3 @@ export {
   type ConfigFactoryOptions,
   type ConfigResult,
 } from "./config-factory.js";
-export {
-  DEFAULT_STREAMS_CONFIG_PATH,
-  DEFAULT_STREAM_SEGMENT_SECONDS,
-  StreamConfigError,
-  findStreamEntry,
-  loadStreamConfig,
-  redactedStreamView,
-  resolveStreamConfigPath,
-  writeStreamConfig,
-  type LoadedStreamConfig,
-  type RedactedStreamView,
-  type StreamConfigEntry,
-  type StreamConfigErrorCode,
-} from "./stream-config.adapter.js";

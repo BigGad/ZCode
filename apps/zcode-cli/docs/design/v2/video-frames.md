@@ -20,13 +20,13 @@ Status as of 2026-10-15: 本文为新建 spec，处于"设计完成、待落地"
 - [`workspace-resource-index.md`](./workspace-resource-index.md)：frame variant 持久化。
 - [`audio-input.md`](./audio-input.md)：audio 转写 worker 的相邻形态。
 
-### 落地范围（2026-10-16，随 RTSP 持续监控首发）
+### 落地范围（2026-10-16 首发；2026-11-06 随 RTSP 持续监控移除后保留抽帧本体）
 
-本阶段（stream-input.md Continuous watch mode 配套）只交付：
+本阶段只交付：
 
 - `packages/contracts/src/interfaces/video-frame.port.ts` 契约（下文原文落地）。
 - `packages/adapters/src/video/ffmpeg-frames.ts`：one-shot `extractFrames`（Node/ffmpeg，模板 = Poppler adapter：availability probe 缓存、argv 无 shell、mkdtemp scratch、finally 清理、typed errors）。
-- frame → image-block 的消费管线只由 stream-monitor 使用：每帧经 `imageProcessorPort.prepareForModel` 预算处理（40 MiB 聚合 / 单帧 > 5 MiB 剥离，规则照抄本文投影表）。
+- frame → image-block 的消费管线：原由 stream-monitor 消费，随该实现于 2026-11-06 一并移除；抽帧 adapter 与契约作为独立能力保留，后续由 video 输入主线消费（每帧经 `imageProcessorPort.prepareForModel` 预算处理：40 MiB 聚合 / 单帧 > 5 MiB 剥离，规则照抄本文投影表）。
 
 **后续阶段**（不在本阶段交付）：浏览器抽帧 worker（`packages/services` 包尚不存在，届时决定落点）、`attachment-video.ts` 的 framesMs 扩展、provider 投影分支（supportsVideo→video block / false→frames）、`meta.frameSamplingStatus` 占位 UI、OFFICIAL_PLUGIN_DEFINITIONS bundle。
 

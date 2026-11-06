@@ -76,7 +76,9 @@ export async function runMemoCommand(
 
   let text: string;
   try {
-    text = await (deps.readTextFile ?? readFile)(filePath);
+    // 显式 utf8：readFile 不带编码时返回 Buffer，这里需要文本。
+    const readText = deps.readTextFile ?? ((targetPath: string) => readFile(targetPath, "utf8"));
+    text = await readText(filePath);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     ctx.stderr.write(`Cannot read "${filePath}": ${message}\n`);

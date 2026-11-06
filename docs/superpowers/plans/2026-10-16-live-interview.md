@@ -4,7 +4,7 @@
 
 **Goal:** 为 ZCode CLI 交付本地麦克风+摄像头的实时访谈记录：分块转写、随时提问、预定关键词规则预警、结束总结。
 
-**Architecture:** 会话内后台 monitor loop（core helper，与已实现的 RTSP stream-monitor 同构）；ffmpeg 设备采集（segmenter 形态）；云端 STT 转写；resource index 持久化 transcript/frames/notes；告警走 JSONL + `MonitorAlertRaised` live-only 事件；`/capture` slash 命令族。
+**Architecture:** 会话内后台 monitor loop（core helper，与 RTSP stream-monitor 同构——后者已于 2026-11-06 移除，此处按其设计文档自行实现）；ffmpeg 设备采集（segmenter 形态）；云端 STT 转写；resource index 持久化 transcript/frames/notes；告警走 JSONL + `MonitorAlertRaised` live-only 事件；`/capture` slash 命令族。
 
 **Tech Stack:** TypeScript / Node.js, vitest, zod, node:sqlite（既有 resource index adapter）, ffmpeg（外部进程,经 executionPort）。
 
@@ -298,7 +298,7 @@ export function createMonitorAlertStore(options: {
 
 - [ ] **Step 1: 写失败测试**：append 写 `<alertStoreDir>/<interviewId>.jsonl` 且每行过 zod；坏行跳过不抛（照抄 stream alert-store 容错）；query `since` 过滤 + limit；`pruneExpired` 清 30 天前行（`STREAM_ALERT_RETENTION_DAYS = 30` 同值常量）；append 无去重（去重是 Task 5/7 的职责）。
 
-- [ ] **Step 2–4: 红→实现→绿** — 结构照抄 `core/src/runtime/stream-monitor/alert-store.ts`。
+- [ ] **Step 2–4: 红→实现→绿** — 结构参照 `stream-input.md`「告警持久化」节（原参照实现 `core/src/runtime/stream-monitor/alert-store.ts` 已于 2026-11-06 移除）。
 
 - [ ] **Step 5: 提交** `feat: interview alert jsonl store`。
 
@@ -315,7 +315,7 @@ export function createMonitorAlertStore(options: {
 
 **Interfaces:**
 
-- Consumes: `StreamMonitorCapture`（`core/src/runtime/stream-monitor/monitor-loop.ts` 已导出的接口，形状见下）、Task 1/5/6 产物、`WorkspaceResourceIndexPort`（`upsert`/`addVariant`/`getById`）、`ToolArtifactStorePort.writeToolResultBinaryArtifact`、`AudioTranscriptionPort`。
+- Consumes: `StreamMonitorCapture`（原 `core/src/runtime/stream-monitor/monitor-loop.ts` 导出的接口，该实现已于 2026-11-06 移除，形状见下）、Task 1/5/6 产物、`WorkspaceResourceIndexPort`（`upsert`/`addVariant`/`getById`）、`ToolArtifactStorePort.writeToolResultBinaryArtifact`、`AudioTranscriptionPort`。
 - Produces:
 
 ```ts
@@ -356,7 +356,7 @@ export function interviewTranscriptEntryId(interviewId: string): string; // `cap
 export function interviewAudioEntryId(interviewId: string, seq: number): string; // `capture-<id>-audio-<seq 六位补零>`（对齐 streamEntryId 先例）
 ```
 
-- [ ] **Step 1: 写失败测试**（fake capture/port，风格照抄 `core/tests/stream-monitor-loop.test.ts`）：
+- [ ] **Step 1: 写失败测试**（fake capture/port，风格参照 `stream-input.md`「所有者与事件顺序」节；原参照测试 `core/tests/stream-monitor-loop.test.ts` 已于 2026-11-06 移除）：
   - **正常链路**：mic capture 吐 2 个关段 → 每段：artifact 写入 → `upsert` audio entry（`kind:"audio"`、`sourceOrigin:"recording"`、`meta.captureOwned === true`）→ transcribe（`diarize: true`，audioRef 为 artifact uri）→ transcript variant 追加（`addVariant`，entry kind `"transcript"`，variant kind `"transcript"`，文本含 `[mm:ss] [Speaker 1]` 前缀，timeMs = `chunk.startedAt - t0`）→ 规则求值 → 命中时 JSONL append + `emitEvent`（type `MonitorAlertRaised`，先 JSONL 后事件，断言顺序）+ `onAlert` → state 游标推进。
   - **重跑幂等**：同 seq 再处理 → `addVariant` 覆盖同 entry，transcript 不重复追加（确定性 entry id）。
   - **转写失败**：该段 transcript 写占位 `[mm:ss] [transcription failed]`，后续段继续。
@@ -365,7 +365,7 @@ export function interviewAudioEntryId(interviewId: string, seq: number): string;
 
 - [ ] **Step 2: 确认失败** — `pnpm --dir apps/zcode-cli test -- packages/core/tests/interview-session-transcript.test.ts`。
 
-- [ ] **Step 3: 实现** — `interview-state.ts` 照抄 `watch-state.ts`（tmp+rename 原子写、损坏重置；state 形状 `{ interviewId; lastProcessedMicSeq; lastProcessedCameraSeq; lastDigestedMicSeq; updatedAt }`）。循环结构照抄 `monitor-loop.ts`：单信号驱动、逐段顺序固定（spec「所有者与事件顺序」）、`Promise.race([chunk 流, signal abort])`。transcript 文本先读现有 variant（`getById`）再拼接写回。`interview-session.ts` 超 400 行时拆 `transcript-pipeline.ts`。
+- [ ] **Step 3: 实现** — `interview-state.ts` 参照 `stream-input.md`「Continuous watch mode」的 watch-state 设计（tmp+rename 原子写、损坏重置；state 形状 `{ interviewId; lastProcessedMicSeq; lastProcessedCameraSeq; lastDigestedMicSeq; updatedAt }`）。循环结构参照 `stream-input.md` 的 monitor-loop 设计：单信号驱动、逐段顺序固定（spec「所有者与事件顺序」）、`Promise.race([chunk 流, signal abort])`。transcript 文本先读现有 variant（`getById`）再拼接写回。`interview-session.ts` 超 400 行时拆 `transcript-pipeline.ts`。
 
 - [ ] **Step 4: 通过后提交** `feat: interview session transcript pipeline`。
 
@@ -380,7 +380,7 @@ export function interviewAudioEntryId(interviewId: string, seq: number): string;
 
 **Interfaces:**
 
-- Consumes: `VideoFramePort.extractFrames({ videoRef, mime, timesMs })` → `{ frames: VideoFrame[] }`（`VideoFrame { timeMs; imageDataUrl; width; height }`）；`ImageProcessorPort.prepareForModel`（签名照抄 `stream-monitor/segment-pipeline.ts` 用法：预算 5MiB base64/单帧、40MiB 聚合，剥离即丢弃）。
+- Consumes: `VideoFramePort.extractFrames({ videoRef, mime, timesMs })` → `{ frames: VideoFrame[] }`（`VideoFrame { timeMs; imageDataUrl; width; height }`）；`ImageProcessorPort.prepareForModel`（预算 5MiB base64/单帧、40MiB 聚合，剥离即丢弃；规则见 `video-frames.md` 投影表）。
 
 - [ ] **Step 1: 写失败测试**：
   - camera 关段 → artifact（`contentType:"video/webm"`）→ `upsert` entry `capture-<id>-video-<seq>`（kind `"video"`、captureOwned）→ `extractFrames` timesMs 为段内均匀 3 帧（`framesPerChunk` 常量，避开首尾 5%）→ 预算处理 → `upsert` entry `capture-<id>-frames-<seq>`（kind `"frame"`，variant mime `"image/jpeg"`，`variant.meta.frames = [{ timeMs, artifactUri, width, height }]` 逐帧 artifact）。

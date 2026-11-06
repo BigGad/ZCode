@@ -13,7 +13,6 @@ import type {
   ToolArtifactStorePort,
   ToolArtifactReadRequest,
   ToolArtifactReadResult,
-  ToolArtifactDeleteRequest,
   ToolArtifactStatRequest,
   ToolArtifactStatResult,
   ToolArtifactWriteRequest,
@@ -207,28 +206,6 @@ export class NodeToolArtifactStore implements ToolArtifactStorePort {
     request: ImageAttachmentPathPrimeRequest,
   ): Promise<MediaAttachmentPathResult> {
     return this.primeMediaAttachmentPath(request);
-  }
-
-  /**
-   * 删除 artifact 文件（stream-monitor segment 保留窗口清理等长期运行场景）。
-   * 幂等：文件已不存在视为已删除并返回 { deleted: true }；URI 无法定位时返回 false。
-   */
-  async deleteToolResultArtifact(
-    request: ToolArtifactDeleteRequest,
-    options?: { signal?: AbortSignal },
-  ): Promise<{ deleted: boolean }> {
-    if (options?.signal?.aborted) {
-      throw options.signal.reason instanceof Error
-        ? options.signal.reason
-        : new Error("Tool artifact delete cancelled");
-    }
-    const { artifactId, sessionId } = parseArtifactUri(request.uri);
-    const sessionDir = join(this.rootDir, sanitizePathSegment(sessionId));
-    const entries = await readdir(sessionDir);
-    const fileName = entries.find((entry) => entry.includes(artifactId));
-    if (!fileName) return { deleted: false };
-    await unlink(join(sessionDir, fileName));
-    return { deleted: true };
   }
 
   primeMediaAttachmentPath(

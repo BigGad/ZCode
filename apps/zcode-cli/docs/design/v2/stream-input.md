@@ -21,7 +21,7 @@ ZCode 还需扩展到**实时 capture**：
 
 ## 当前实现状态
 
-Status as of 2026-10-15: 本文为新建 spec，处于"设计完成、待落地"状态。2026-10-16 增补 `network-stream` source 与 Continuous watch mode（RTSP 持续监控），该增补部分进入实施。相关分 spec：
+Status as of 2026-11-06: 本文为新建 spec，整体处于"设计完成、待落地"状态。2026-10-16 增补的 `network-stream` source 与 Continuous watch mode（RTSP 持续监控）**已实现并于 2026-11-06 整体移除**（`zcode stream` 命令、core `stream-monitor` 模块、ffmpeg RTSP segmenter、`streams.json` 配置），该部分方案待重做；本文的 LiveCapturePort 契约与 StreamSession 语义仍是后续方向。相关分 spec：
 
 - [`multimodal-platform.md`](./multimodal-platform.md)：总体架构。
 - [`audio-input.md`](./audio-input.md)：流式 audio 进入主线的下游链路。
@@ -199,7 +199,7 @@ traceId 从 `LiveCaptureStartRequest.trace` 进入；后续 `commit` 的 TraceCo
 
 ## 入口适配
 
-### CLI
+### CLI（待落地，入口形态随 `zcode stream` 命令一并移除，待重做）
 
 ```
 zcode stream mic --prompt "把刚才我说的话总结一下"
@@ -208,19 +208,9 @@ zcode stream screen --policy screen-recording
 
 行为：CLI 启动 stream session → 持续 stream 到文件结束（用户 Ctrl+C / Enter 提交） → 走 audio-input / video-frames 主线。
 
-### CLI（network-stream，2026-10-16）
+### CLI（network-stream，2026-10-16，已移除，待重做）
 
-```
-zcode stream analyze --stream <id> --once   # 抓一个 segment 做一次分析（最小垂直切片）
-zcode stream watch --stream <id>            # 长驻持续监控 + 异常告警（Ctrl+C 干净退出）
-zcode stream watch --stream <id> --duration 2h   # 定时结束（也支持 --until <ISO|epoch-ms>）
-zcode stream watch --stream <id> --forever       # 后台常驻（detached 子进程 + 日志文件），立即返回
-zcode stream stop --stream <id>             # 停止后台常驻 watch
-zcode stream events [--stream <id>] [--since <t>] [--limit <n>] [--json]
-zcode stream list                           # 列出 streams.json 中已配置的流（脱敏 URL）
-```
-
-`watch` 是第一个 CLI 优先入口；TUI / Desktop / bundle（OFFICIAL_PLUGIN_DEFINITIONS）对 network-stream 为非目标，后续阶段再评估。
+原实现的 `zcode stream analyze/watch/stop/events/list` 子命令族随 2026-11-06 的实现移除一并下线；原设计意图（定时抓片段 → 抽帧 → 分析 turn → 异常告警）保留在本文「Continuous watch mode」节，命令形态与配置（`streams.json`）待重做后再定。
 
 ### TUI
 
@@ -300,15 +290,17 @@ if (platformService.getMediaAccessStatus(source) === "denied") {
 - 实时 chunk 不发送给 provider；必须 commit 后形成的 entry 才能进入模型显式输入。
 - 限制：不允许用户在 active capture 期间把 stream 直接给模型（避免凭据 / 隐私问题）。
 
-### 凭据管理（network-stream，2026-10-16）
+### 凭据管理（network-stream，2026-10-16；已随实现移除，待重做）
 
 - RTSP 凭据存独立受控配置 `~/.zcode/cli/streams.json`（创建时 chmod 0600；Windows 无 POSIX 权限模型，尽力而为并文档注明剩余风险）。不并入 provider 配置（模型凭据域），也不进 workspace `resource-policy.yaml`（per-workspace 业务策略）；两者靠 `policyTag` 关联——streams.json 保存 tag，resource-policy.yaml 定义抽帧策略。
-- URL 脱敏统一走 `redactUrlCredentials`（`core/src/util/redact-url.ts`，从 webfetch-url.ts 提升）；stream 全链路（CLI 输出、日志字段、alert JSONL、错误消息、事件 payload）只允许出现脱敏 URL。
+- URL 脱敏走 `redactUrlCredentials`（`core/src/tool/handlers/webfetch-url.ts`）；stream 全链路（CLI 输出、日志字段、alert JSONL、错误消息、事件 payload）只允许出现脱敏 URL。
 - 凭据传给 ffmpeg 的通道：argv 直传（`mode: "argv"` 无 shell 拼接）。ffmpeg 不支持从文件/stdin 读输入 URL，故无替代通道；残余风险：子进程 URL 对同机其他用户经 ps 可见——与 PDF 密码先例（Poppler argv，pdf/index.ts）同一声明，spec 显式接受。
 - 凭据不进 prompt（分析 turn 文本只含 stream id/title 与判定指令）、不进测试 fixture（fixture 用 `rtsp://user:***@host` 形态）。
 - 环境变量：`ZCODE_STREAM_CONFIG`（覆盖 streams.json 路径，优先级高于默认路径，用于测试与多配置）与 `ZCODE_STREAM_FFMPEG_PATH`（覆盖 ffmpeg 可执行文件发现，应对不在 PATH 的 Windows 场景）。两者仅在此处定义，配置文件与 CLI 参数能表达的能力不新增环境变量。
 
-## Continuous watch mode（RTSP 持续监控，2026-10-16）
+## Continuous watch mode（RTSP 持续监控，2026-10-16；实现已移除，待重做）
+
+> 状态：本文节描述的实现（core `stream-monitor` 模块、ffmpeg RTSP segmenter、`zcode stream` 子命令族、`streams.json`）已于 2026-11-06 移除；以下内容作为方案记录保留，落地形态待重做。
 
 使用形态：定时从网络流抓片段 → 抽帧 → in-process 分析 turn → 结构化判定 → 异常告警。与上文的「录制后 commit」语义有**一处显式偏离**：
 
@@ -402,7 +394,7 @@ if (platformService.getMediaAccessStatus(source) === "denied") {
 
 ### Phase 6.6：CLI / TUI / Desktop 入口
 
-- CLI `zcode stream <source>`。
+- CLI `zcode stream <source>`（原实现已随 2026-11-06 移除，入口形态待重做）。
 - TUI 快捷键。
 - Desktop GUI 按钮。
 

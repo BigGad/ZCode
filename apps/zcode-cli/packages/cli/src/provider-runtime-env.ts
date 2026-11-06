@@ -126,9 +126,6 @@ function requiresProviderRuntime(argv: readonly string[]): boolean {
     command === "agent-server" ||
     command === "login" ||
     command === "logout" ||
-    // stream analyze/watch 需要创建 app 跑分析 turn；list/events 一并准备
-    // （只解析配置路径，不启动下载与模型请求）。
-    command === "stream" ||
     // recognize 同样要创建 app：既要读 registry 快照挑视觉模型，又要跑子代理。
     command === "recognize" ||
     // providers init 要读 registry 才能生成指向真实模型的具名类型。

@@ -144,33 +144,6 @@ export const parseGlobalArgs = (argv: string[]) =>
       tools: {
         type: "boolean",
       },
-      // `zcode stream` 子命令旗标：RTSP 持续监控（严格解析器要求全局注册）。
-      stream: {
-        type: "string",
-      },
-      once: {
-        type: "boolean",
-      },
-      follow: {
-        type: "boolean",
-      },
-      status: {
-        type: "string",
-      },
-      config: {
-        type: "string",
-      },
-      // stream watch 运行时长与后台常驻（stream-input.md「运行时长与后台常驻」节）。
-      duration: {
-        type: "string",
-      },
-      forever: {
-        type: "boolean",
-      },
-      // 内部旗标：--forever 后台子进程标记，不写入帮助文案。
-      daemon: {
-        type: "boolean",
-      },
       // `zcode providers init` 子命令旗标：生成具名模型类型（严格解析器要求全局注册）。
       "dry-run": {
         type: "boolean",

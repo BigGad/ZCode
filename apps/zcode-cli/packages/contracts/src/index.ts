@@ -92,7 +92,6 @@ export * from "./path/index.js";
 
 // Network
 export * from "./network/public-egress-ip.js";
-export * from "./network/redact-url.js";
 
 // Tools
 export * from "./tools/index.js";

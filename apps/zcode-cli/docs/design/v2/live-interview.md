@@ -18,11 +18,11 @@
 
 ## 当前实现状态
 
-Status as of 2026-10-16: 本文为新建 spec，处于"设计完成、待落地"状态。相关分 spec：
+Status as of 2026-10-16: 本文为新建 spec，处于"设计完成、待落地"状态。2026-11-06：本文引用的 RTSP 持续监控实现（`createFfmpegRtspSegmenter` / `zcode stream` 子命令族）已移除，其落地形态待重做；本文自身的 interview monitor 设计不受影响。相关分 spec：
 
 - [`stream-input.md`](./stream-input.md)：LiveCapturePort 契约、per-segment commit 语义、watch mode 所有者与事件顺序、告警 JSONL。本文复用其语义并做两处显式修订（见下）。
 - [`audio-input.md`](./audio-input.md)：AudioPort / AudioTranscriptionPort 契约、后台转写 worker、transcript variant 持久化。
-- [`video-frames.md`](./video-frames.md)：VideoFramePort 契约、ffmpeg 抽帧 adapter（随 RTSP 监控首发）。
+- [`video-frames.md`](./video-frames.md)：VideoFramePort 契约、ffmpeg 抽帧 adapter（抽帧 adapter 与契约独立保留）。
 - [`multimodal-platform.md`](./multimodal-platform.md)：总体架构。
 
 ### 对既有 spec 的修订
@@ -76,7 +76,7 @@ Status as of 2026-10-16: 本文为新建 spec，处于"设计完成、待落地"
 
 ### 所有者与事件顺序
 
-单一所有者：interview monitor 循环归**当前交互 session 的 runtime 进程**（会话内后台任务，见"进程与会话模型"；循环本体是 core helper，与 watch mode 的 `createStreamMonitor` 同构，Desktop Host 将来接管时挂同一 helper）。
+单一所有者：interview monitor 循环归**当前交互 session 的 runtime 进程**（会话内后台任务，见"进程与会话模型"；循环本体是 core helper，与原 watch mode 的 `createStreamMonitor` 同构——该 helper 已随 RTSP 监控于 2026-11-06 移除，本文自行实现，Desktop Host 将来接管时挂同一 helper）。
 
 ```text
 用户                    runtime 进程（交互 session）      resource index        转写/抽帧 worker
@@ -109,7 +109,7 @@ Status as of 2026-10-16: 本文为新建 spec，处于"设计完成、待落地"
 
 ### Node 采集形态（2026-10-16 落地修正）
 
-`LiveCapturePort` 契约不变（面向未来 Electron / Web adapter）。Node 侧设备采集的落地形态是 **`createFfmpegDeviceSegmenter`**，与已验证的 `createFfmpegRtspSegmenter`（`packages/adapters/src/video/ffmpeg-rtsp.ts`）同接口：`start(request)` / `watchClosedSegments(signal)` / `readSegment(path)` / `stop()`。理由：interview monitor 需要 per-segment commit（watch mode 同构），LiveCapturePort 的 session-commit 语义与之冲突；设备选择（audioDevice / videoDevice）走 segmenter start 参数与 slash 命令配置，**不新增** `nodeDevice` constraints 字段。
+`LiveCapturePort` 契约不变（面向未来 Electron / Web adapter）。Node 侧设备采集的落地形态是 **`createFfmpegDeviceSegmenter`**，接口形态 `start(request)` / `watchClosedSegments(signal)` / `readSegment(path)` / `stop()`（原参照实现 `createFfmpegRtspSegmenter` 已随 RTSP 监控于 2026-11-06 移除）。理由：interview monitor 需要 per-segment commit（watch mode 同构），LiveCapturePort 的 session-commit 语义与之冲突；设备选择（audioDevice / videoDevice）走 segmenter start 参数与 slash 命令配置，**不新增** `nodeDevice` constraints 字段。
 
 `LiveCaptureErrorCode` 复用，补充映射：
 
@@ -244,11 +244,11 @@ capture 是交互 session 内的后台任务，命令走 command-center slash �
 /capture speaker map <label> 你|对方   # 显式覆盖说话人角色映射（缺省由 digest 推断）
 /capture devices               # 枚举可用麦克风/摄像头
 /capture stop [--summary]      # 停止采集；--summary 触发总结 turn（默认触发）
-/capture events [--since <t>] [--json]  # 对齐 zcode stream events
+/capture events [--since <t>] [--json]  # 事件流（告警 JSONL）
 ```
 
 - 访谈期间的"随时提问"就是普通 prompt：提问 turn 自动注入文本上下文（见"滚动消化"）；帧经 agent 的帧回查工具按需取。
-- headless 场景：capture 依赖交互（提问、规则增删），headless 不提供 capture 入口；无头自动化场景由 RTSP watch mode 覆盖。
+- headless 场景：capture 依赖交互（提问、规则增删），headless 不提供 capture 入口；无头自动化场景待网络流监控方案重做后再定。
 - CLI / TUI / Desktop bundle 装配与 `OFFICIAL_PLUGIN_DEFINITIONS` entry 沿用 `stream-input.md` Bundle 装配节（TUI/CLI defaultEnabled 与其对齐）。
 
 ## 实施步骤

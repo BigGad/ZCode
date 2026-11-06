@@ -28,7 +28,6 @@ import { runLoginCommand, runLogoutCommand } from "./login-command.js";
 import { runMemoCommand } from "./memo-command.js";
 import { runUsageCommand } from "./usage-command.js";
 import { runRecognizeCommand } from "./recognize-command.js";
-import { runStreamCommand } from "./stream-command.js";
 import { CLI_COMMAND_NAME, CLI_PROCESS_NAME } from "./process-name.js";
 import { isPluginHostInvocation, runPluginHostCommand } from "./plugin-host-command.js";
 import { isDwfChildInvocation, runDwfChildCommand } from "./dwf-child-command.js";
@@ -728,22 +727,6 @@ export const run = async (ctx: RunContext, deps: RunDependencies = {}): Promise<
           ? { imageGlob: parsed.values["image-glob"] }
           : {}),
       }, commandDeps);
-    case "stream":
-      return await runStreamCommand(ctx, options, {
-        subcommand: parsed.positionals[1],
-        ...(typeof parsed.values.stream === "string" ? { stream: parsed.values.stream } : {}),
-        ...(parsed.values.once === true ? { once: true } : {}),
-        ...(parsed.values.follow === true ? { follow: true } : {}),
-        ...(typeof parsed.values.since === "string" ? { since: parsed.values.since } : {}),
-        ...(typeof parsed.values.until === "string" ? { until: parsed.values.until } : {}),
-        ...(typeof parsed.values.limit === "string" ? { limit: Number(parsed.values.limit) } : {}),
-        ...(typeof parsed.values.status === "string" ? { status: parsed.values.status } : {}),
-        ...(typeof parsed.values.config === "string" ? { config: parsed.values.config } : {}),
-        ...(typeof parsed.values.duration === "string" ? { duration: parsed.values.duration } : {}),
-        ...(parsed.values.forever === true ? { forever: true } : {}),
-        ...(parsed.values.daemon === true ? { daemon: true } : {}),
-        version,
-      });
     case "tui":
       return await runTuiCommand(
         ctx,
