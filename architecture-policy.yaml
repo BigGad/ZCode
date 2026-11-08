@@ -1511,3 +1511,87 @@ exceptions:
     paths:
       - packages/zcode-cua/src/**
     reason: The whole zcode-cua producer package (broker, native adapters, tools) entered the repo after the gate timestamp as pre-existing code moved from a separate repository; adopting its internal layers needs a dedicated CONTRACT pass (it has known internal cycles by design), not a mechanical split in this branch.
+
+  - id: recognize-batch-multimodal-cli-unmanaged-files
+    rule: unmanaged-new-file
+    paths:
+      - apps/zcode-cli/packages/cli/src/recognize-agent.ts
+      - apps/zcode-cli/packages/cli/src/recognize-command.ts
+      - apps/zcode-cli/packages/cli/src/recognize-grounding.ts
+      - apps/zcode-cli/packages/cli/src/recognize-model.ts
+      - apps/zcode-cli/packages/cli/src/recognize-output.ts
+      - apps/zcode-cli/packages/cli/src/recognize-progress.ts
+      - apps/zcode-cli/packages/cli/src/recognize-runtime.ts
+      - apps/zcode-cli/packages/cli/src/recognize-schema.ts
+      - apps/zcode-cli/packages/cli/src/recognize-signer.ts
+      - apps/zcode-cli/packages/cli/src/recognize-walker.ts
+    reason: zcode recognize 图片文件夹批量多模态识别 CLI（2026-10-19 建立命令族，2026-10-27 补接地门）。recognize-* 十个文件是同一条命令的私有分层：walker 遍历目录、schema 校验、agent 编排、model 分流、output 投影、progress 上报、signer 签名、runtime 装配、grounding 接地门；它们互不外露，只经 run.ts 的 case "recognize" 暴露一个既有形态的子命令。依赖方向与分层不变，接管整个 cli 包不在本次范围内。
+  - id: named-model-types-and-capability-override-unmanaged-files
+    rule: unmanaged-new-file
+    paths:
+      - apps/zcode-cli/packages/cli/src/model-type.ts
+      - apps/zcode-cli/packages/cli/src/capability-override.ts
+      - apps/zcode-cli/packages/cli/src/providers-command.ts
+      - apps/zcode-cli/packages/cli/src/command-center/handlers/model-type.ts
+    reason: 命名模型类型与 --capability 点名能力模型（2026-10-27）。model-type 是 provider 配置的类型维度读侧；capability-override 复用既有 --capability 旗标并保持其取值形态（<能力键>=<模型类型名>）不变；providers-command 与 command-center 的 model-type handler 是既有命令面内的增量。--capability 旗标语义与包依赖方向均未改变，接管整个 cli 包不在本次范围内。
+  - id: audio-transcription-port-declarations
+    rule: unmanaged-new-file
+    paths:
+      - apps/zcode-cli/packages/contracts/src/interfaces/audio.port.ts
+      - apps/zcode-cli/packages/contracts/src/interfaces/audio-transcription.port.ts
+    reason: 音频输入与转写 port 契约（2026-10-17，live-interview 实施计划）。只在 contracts 层新增 port 声明，不含实现；contracts 包整体是未受管的存量包，逐个 port 单独登记模块的收益低于整体迁移，按路径豁免。
+  - id: video-frame-and-live-capture-unmanaged-files
+    rule: unmanaged-new-file
+    paths:
+      - apps/zcode-cli/packages/contracts/src/interfaces/live-capture.port.ts
+      - apps/zcode-cli/packages/contracts/src/interfaces/video-frame.port.ts
+      - apps/zcode-cli/packages/adapters/src/video/ffmpeg-frames.ts
+      - apps/zcode-cli/packages/adapters/src/video/index.ts
+      - apps/zcode-cli/packages/bootstrap/src/app/port-wiring.ts
+    reason: 视频抽帧与直播采集 port（2026-10-17 的 RTSP 特性，该特性已于 2026-11-06 下线，port 与抽帧实现保留供新方案复用）。port 声明在 contracts、ffmpeg 抽帧实现在 adapters，仍是 adapters 只依赖 contracts 的方向；port-wiring.ts 是 bootstrap 侧的既有装配位（architecture.md §1.2 规定的唯一组合根），只为这批 port 增挂实现，不改装配方式。接管整个 adapters 包不在本次范围内。
+  - id: workspace-resource-index-and-usage-unmanaged-files
+    rule: unmanaged-new-file
+    paths:
+      - apps/zcode-cli/packages/contracts/src/interfaces/workspace-resource-index.port.ts
+      - apps/zcode-cli/packages/adapters/src/storage/workspace-resource-index.ts
+      - apps/zcode-cli/packages/core/src/runtime/helpers/attachment-resource-index.ts
+      - apps/zcode-cli/packages/core/src/runtime/helpers/resource-index/gc.ts
+      - apps/zcode-cli/packages/core/src/runtime/helpers/resource-policy/parser.ts
+      - apps/zcode-cli/packages/core/src/runtime/helpers/resource-policy/resolver.ts
+      - apps/zcode-cli/packages/cli/src/usage-command.ts
+    reason: workspace 资源索引与 token 用量明细导出（2026-10-17）。port 在 contracts、索引实现在 adapters、gc 与资源策略在 core、usage-command 在 cli；core 只依赖 contracts、adapters 只依赖 contracts 的方向未变。该功能横跨 core/adapters/cli 三个包，登记模块需要一次独立的边界重构，不在本分支。
+  - id: pdf-password-and-read-progress-unmanaged-files
+    rule: unmanaged-new-file
+    paths:
+      - apps/zcode-cli/packages/core/src/runtime/helpers/attachment-pdf-local-render.ts
+      - apps/zcode-cli/packages/core/src/runtime/helpers/attachment-pdf-pages.ts
+      - apps/zcode-cli/packages/core/src/runtime/helpers/inline-media-resolver.ts
+      - apps/zcode-cli/packages/core/src/runtime/helpers/pdf-password-cache.ts
+      - apps/zcode-cli/packages/core/src/runtime/helpers/pdf-password-port.ts
+      - apps/zcode-cli/packages/core/src/runtime/methods/pdf-password-prompt.ts
+      - apps/zcode-cli/packages/core/src/runtime/methods/turn-attachment-page-counts.ts
+      - apps/zcode-cli/packages/core/src/tool/handlers/read-pdf-progress.ts
+      - apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/product-projection-attachment-meta.ts
+    reason: PDF 密码统一通道与 Read 阅读进度、附件页数徽标（2026-10-17）。密码的 port/cache/prompt 分列 core 的 helpers 与 methods，附件渲染与页数在 core 的 helpers，tool handler 在 core 的 handlers，V4 投影在 bootstrap；core 不依赖 adapters、bootstrap 只做装配的依赖方向未变。接管整个 core runtime 目录不在本次范围内。
+  - id: capability-image-understanding-split-unmanaged-files
+    rule: unmanaged-new-file
+    paths:
+      - apps/zcode-cli/packages/core/src/runtime/helpers/capability-image-description.ts
+      - apps/zcode-cli/packages/core/src/runtime/methods/capability-image-understanding.ts
+    reason: 能力模型选择——主 LLM 与图片理解模型分配置（2026-10-27）。图片理解的分流与描述生成留在 core 内部，只在「主模型显式不支持图片且用户配了 capabilityModelSelections.image」时启用；不改 provider 契约、不改模型请求格式，依赖方向不变。
+  - id: memo-v30-contract-unmanaged-files
+    rule: unmanaged-new-file
+    paths:
+      - packages/shared/src/memo-v30/**
+      - apps/zcode-cli/packages/cli/src/memo-command.ts
+    reason: v3.0 笔录契约可执行化——披露通道 + CF 机器可读 + 校验 CLI（2026-10-28）。memo-v30 的 schema/tables/validate/cross-fields 整体落在 shared 的同一子目录、只导出契约与校验；memo-command.ts 是既有 memo 命令面的薄封装，退出码 0/1/2 的对外契约不变。接管整个 shared 包不在本次范围内。
+  - id: image-extensions-shared-constant-unmanaged-file
+    rule: unmanaged-new-file
+    paths:
+      - apps/zcode-cli/packages/cli/src/image-extensions.ts
+    reason: 提取 IMAGE_EXTENSIONS 到共享模块（2026-10-19 的纯重构）。把既有图片扩展名常量从散落处收敛为单一常量文件，不改调用方的判定行为，也不改模块依赖方向；spec 同步见 docs/design/v2 多模态平台设计 §10.5 回溯注释。
+  - id: upstream-tui-prompt-handler-runtime-edit
+    rule: unmanaged-new-file
+    paths:
+      - apps/zcode-cli/packages/cli/src/tui-prompt-handler-runtime.ts
+    reason: 该文件由上游 open source 提交（2026-09-21）引入、本次仅被上游 v3.17.2 同步改动（相对 origin/main 是 M 而非 A）。按上游准入规则，首次推送后它不再是新增路径、后续编辑需退出存量准入并登记模块；为它单独登记一个模块不成立——它随 cli 包的 TUI 提示处理一起演进，本次同步未改变其模块边界。
