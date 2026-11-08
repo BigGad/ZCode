@@ -1,8 +1,22 @@
 # 本地基础设施管理（`zcode-infr-manage`）
 
-Status: 规格已定，未实现。
+Status: **v1 已实现**（2026-11-09）：端口 + 命令面 + 分发链 + 回归测试已落地；**`asset` 命令组延期**（§7.3）。
 
 > ⚠️ **本版经四路对抗审查后重写。** 上一版有 43 处问题被查出，其中 11 处是阻断级（含 5 处**事实性写错**）。修订要点见 §12。
+
+### 实施状态（2026-11-09）
+
+| 落点 | 路径 | 状态 |
+| --- | --- | --- |
+| 端口契约 | `apps/zcode-cli/packages/contracts/src/interfaces/local-infra.port.ts` | ✅ 已写 |
+| 端口实现 | `apps/zcode-cli/packages/adapters/src/local-infra/`（定位 / 档位 / 子进程 / 产物分类 / 模型状态） | ✅ 已写 |
+| 通用解包器 | `apps/zcode-cli/packages/adapters/src/fs/zip-extract.ts` | ✅ 已写（从 `plugins/zip-source.ts` 抽出并复用，路径穿越加固不重复实现） |
+| 命令面 | `apps/zcode-cli/packages/cli/src/infr-manage/`（参数 / 输出 / doctor / parse / models） | ✅ 已写 |
+| 分发链 | `packages/cli/scripts/build.mjs`（第二入口）、`scripts/build-zcode.mjs`、`scripts/zcode-distribution/{runner,installer}.mjs` | ✅ 已写（**第二个 runner**，见 §7.3） |
+| 配置键 | `adapters/src/config/schema.ts` 的 `ocr` 段（`mineruPath` / `mineruProxy`） | ✅ 已写 |
+| 回归测试 | `packages/adapters/tests/local-infra/`（vitest，28 例）、`packages/cli/tests/infr-manage-command.test.ts`（node:test，14 例） | ✅ 已写 |
+| `asset` 命令组 | — | ⏸️ **延期**，阻塞项见 §7.3 |
+| SEA / Electron 桌面 | — | ❌ v1 不提供（§1 已声明） |
 
 ## 1. 目的与范围
 
@@ -29,7 +43,7 @@ Status: 规格已定，未实现。
 | spec | 关系 |
 | --- | --- |
 | [`ocr-local.md`](./ocr-local.md) | 本 spec 是它的**引擎层扩展**：OCR 能力的引擎从"只有 tesseract"变成"引擎链"。⚠️ `ocr-local.md` 假定引擎是"spawn 一个 CLI、读 TSV"，而 MinerU 是**文档级**、产物是 markdown + 块级结构 → 引擎契约与 sidecar 格式都要改（§10 同步清单）。**v1 不改实现**，但边界要写死 |
-| [`model-assets.md`](./model-assets.md) | 本 spec **吸收其 CLI 表面**（`zcode asset` → `zcode-infr-manage asset`），顺带结掉它 §14 的开放问题 7。其"引擎二进制仍由用户自行安装"的决策**保持不变**并升格为通用原则（§3.1） |
+| [`model-assets.md`](./model-assets.md) | 本 spec 原计划**吸收其 CLI 表面**（`zcode asset` → `zcode-infr-manage asset`），顺带结掉它 §14 的开放问题 7。⚠️ **v1 该命令组整体延期**（§7.3 的 7 条待决：目录地址只有占位 URL 等）⇒ 只保留其"引擎二进制仍由用户自行安装"的决策，并**升格为通用原则**（§3.1） |
 | [`capability-registry.md`](./capability-registry.md) | `CapabilityPorts` 新增一项 `localInfra`（v1 定义契约与实现，**不接三投影**） |
 | [`knowledge-rag.md`](./knowledge-rag.md) | v1 不改。⚠️ 但 **MinerU 4.x 自带索引与检索**（`mineru search` / `find` / `read`，需要 Doclib server），与本 spec 规划的"客户端本地知识库"功能重叠 → 边界见 §3.3 |
 | [`model/http-proxy.md`](./model/http-proxy.md) | ⚠️ **本 spec 的代理策略是那份文件的一个例外，必须去那里登记**（见 §7.9） |
@@ -317,10 +331,12 @@ model.source: huggingface
 
 | 目标字段 | 判定 |
 | --- | --- |
-| `markdownPath` | 唯一 `.md` 条目 |
-| `structuredContentPath` | JSON 且顶层有 `pages` 数组 |
-| `middleJsonPath` | 其余 JSON |
-| **`assetsDir`** | ⚠️ **新增**：含 `images/` 的条目集合所在目录（可能不存在）。**必须与 `markdown.md` 同级** |
+| `markdownPath` | 最浅的 `.md` 条目（同深度时优先叫 `markdown.md` 的） |
+| `middleJsonPath` | JSON 且顶层有 `schema` / `schema_version`（4.x）或 `pdf_info`（2.x） |
+| `structuredContentPath` | **其余** JSON 里顶层有 `pages` 数组的 |
+| **`assetsDir`** | ⚠️ **新增**：图片等资源文件的公共父目录（可能不存在）。**必须落在 `markdown.md` 所在目录之内**（同级或其子目录） |
+
+⚠️ **判据顺序不能反** —— 实测 4.1.7 的 `structured_content.json` 与 `middle_json.json` **同形**：顶层都是 `pages`、页内都是 `pages[].blocks`、连 `extensions.mineru.tier` 都一样 ⇒ **"顶层有 `pages` 数组"区分不了两者**。真正的判别是 `middle_json` 顶层独有的 `schema: "docvortex.middle"` / `schema_version`。⇒ **先判 middle，剩下的才是 structured**；structured 没认出来时，把认不出的那个 JSON 当 structured（那是用户真正要的产物，认错的后果只是取不到 `tier`，不会报错）。
 
 ⚠️ **不要按"扫描出来的文件"过滤** —— `images/` 里的 jpg 要**原样落盘**（相对路径依赖它）。
 
@@ -466,6 +482,8 @@ model.source: huggingface
 
 ⚠️ 第 ⑤ 步是**硬要求**：产物断言失败必须报失败，不能因为退出码 0 就当成功（§5.4）。
 
+⚠️ **`parse` 是子命令，必须放在 argv 的第一位** —— 实测 `mineru-kit parse --help` 的签名是 `mineru-kit parse [OPTIONS] {inputs}...`。⇒ 漏掉 `parse` 时引擎会把**输入路径当成未知子命令**，报 `No such command '/path/to.pdf'`（退出码 2）——看起来像"文件不对"，实际是调用形状错了。⚠️ 这类错误**假引擎测不出来**（夹具对 argv 照单全收），必须让假引擎也挑形状，否则只能等真实环境才发现。
+
 ### 6.3 二期：Doclib 路线
 
 ⚠️ **v1 不做**（D9 修订）。若二期要引入 Doclib（为了索引 / 检索 / 缓存，对接 `knowledge-rag.md`），以下是当时要处理的：
@@ -506,12 +524,32 @@ export interface CapabilityPorts {
 
 ```ts
 export type LocalEngineId = "mineru";
+
+/**
+ * MinerU 的四档枚举。⚠️ 集合**不能硬编码成三档**：实测
+ * `mineru-kit hardware detect --json` 的 `pdf_image_tiers` 是
+ * `["flash","basic","standard","advanced"]`，其中 `flash` 官方文档从未出现过。
+ */
 export type MineruTier = "flash" | "basic" | "standard" | "advanced";
+export const MINERU_TIERS: readonly MineruTier[] = ["flash", "basic", "standard", "advanced"];
+
+/** 子进程代理策略。`strip` = 剥掉代理变量直连；`inherit` = 原样继承。 */
+export type MineruProxyPolicy = "strip" | "inherit";
+
+/** 引擎定位与代理策略的配置输入（来自 `ocr.*` 配置键）。 */
+export interface LocalInfraConfig {
+  readonly mineruPath?: string;      // 配置键 `ocr.mineruPath`（只指向 mineru-kit）
+  readonly mineruProxy?: MineruProxyPolicy;  // 配置键 `ocr.mineruProxy`
+}
 
 /** 端口的依赖 —— 由组合根（bootstrap / CLI 入口）注入，与 CapabilityPorts 里的同一个实例。 */
 export interface LocalInfraDeps {
   readonly execution: ExecutionPort;
   readonly fileSystem: FileSystemPort;
+  /** 配置层解析出的引擎路径与代理策略。不给则只用 PATH 与常见安装位置探测。 */
+  readonly config?: LocalInfraConfig;
+  /** PDF 页数读取（超时预算要用页数）。不给则按 1 页计并在 `warnings[]` 说明。 */
+  readonly pdf?: PdfDocumentPort;
 }
 
 export interface LocalInfraPort {
@@ -519,11 +557,18 @@ export interface LocalInfraPort {
   doctor(options?: { readonly engine?: LocalEngineId }): Promise<LocalInfraDoctorReport>;
   /** 解析一份文档。 */
   parse(request: LocalParseRequest): Promise<LocalParseResult>;
+  /** 下载目标档位的模型权重。 */
+  downloadModels(request: LocalModelsDownloadRequest): Promise<LocalModelsDownloadResult>;
 }
 
 /** 组合根用这个工厂装配。 */
 export function createLocalInfraPort(deps: LocalInfraDeps): LocalInfraPort;
 ```
+
+⚠️ **`config` 与 `pdf` 都是可选的，但各有明确语义**：
+
+- `config` 不给 ⇒ 只按 PATH 与常见安装位置探测引擎，代理策略取默认（`strip`）。**配置的读取与层级归配置层**（`ocr.mineruPath` / `ocr.mineruProxy`，层级：项目级 > 用户级），端口只负责"拿到路径后怎么用"。
+- `pdf` 不给 ⇒ 解析超时预算按 1 页计，并在 `warnings[]` 说明。⚠️ **可选是刻意的**：poppler（`pdfinfo`）不是 ZCode 的依赖，缺它不应让解析功能不可用。
 
 - **端口类型**放 `apps/zcode-cli/packages/contracts/src/interfaces/local-infra.port.ts` —— **纯 TS 接口，不引 zod**（`execution.port.ts` / `file-system.port.ts` 就是先例）。
 - ⚠️ **必须同时进两个 barrel**：`packages/contracts/src/interfaces/index.ts` 与 `packages/contracts/src/index.ts`（后者是**逐个显式 export**，不是 `export *`）。
@@ -552,8 +597,28 @@ apps/zcode-cli/packages/cli  ←  CLI 外壳：zcode-infr-manage
 ```
 zcode-infr-manage doctor [--json]
 zcode-infr-manage parse --path <file> [--output <dir>] [--tier <tier>] [--json]
-zcode-infr-manage asset list|catalog|install|use|remove|verify|path
+zcode-infr-manage models download --tier <basic|standard> [--source <auto|huggingface|modelscope>] [--json]
 ```
+
+⚠️ **`models download` 是 v1 的第三个子命令** —— §7.9 的代理策略与 §7.7 的 `ocr.mineruProxy` 旋钮都预设了"ZCode 会 spawn `mineru-kit models download`"这件事：若没有这个命令，那两处规则就悬空（配置键没有消费方）。⚠️ **MinerU 的 `models download --tier` 只接受 `basic` / `standard`**（实测 `mineru-kit models download --help`），其它档位命令面直接拒绝并给出可用值。
+
+#### ⏸️ `asset` 命令组：v1 延期（不实现）
+
+`model-assets.md` §5 的 `asset list|catalog|install|use|remove|verify|path` **在 v1 不实现**。原因不是工作量，而是**缺决策**：那份 spec 的默认资产目录只有占位地址（`https://cdn.example.com/zcode/assets/`、`https://mirror.internal/...`）⇒ 默认 `catalogUrl` / `baseUrl` **不存在**，`asset catalog` / `asset install` 的在线路径天然不可用。⇒ **要么把占位地址换成真实地址并补齐下面的决策，要么整个命令组不出现**——不能半实现（半实现的在线命令会给用户"能装"的错觉）。
+
+需要先定的 7 件事（**都需要产品/运维侧拍板，实现侧无法代决**）：
+
+| # | 待决 | 为什么阻塞 |
+| --- | --- | --- |
+| 1 | 资产目录的真实 `catalogUrl` 与 `baseUrl` | 现在只有占位地址 ⇒ 在线命令不可用 |
+| 2 | 目录的**签名与校验**（manifest 签名、公钥分发） | 没校验就不能校验完整性，供应链风险 |
+| 3 | 资产与 **MinerU 模型仓库**的关系 | 两套下载体系是否合并、谁负责缓存 |
+| 4 | 资产落盘位置（`~/.zcode/assets`? 工作区内?） | 决定 `asset path` / `asset use` 的语义与隔离边界 |
+| 5 | **离线**（`--offline`）的语义 | `model-assets.md` 的 `--offline` 从未进过 `zcode` 的全局旗标表 |
+| 6 | `asset use` 改的是哪一份配置、要不要撤销/回滚 | 写状态就有 owner 与并发问题 |
+| 7 | 与 tesseract 词表等**其它资产**的关系 | 决定 `asset list` 的分类维度 |
+
+⇒ **v1 的资产能力只保留"引擎二进制由用户自行安装"这一条原则**（§3.1），资产目录下载整体延期。**`zcode-infr-manage` 的命令面不出现 `asset` 子命令**——留一个空壳比不留更糟。
 
 ⚠️ **旗标名统一用长名**（M14）：`--path` / `--output` / `--tier` / `--json`。与 MinerU 自己的 `--output` 一致，也消除 `-o` / `--output` / `outputDir` 三名并存。
 
@@ -574,6 +639,7 @@ zcode-infr-manage asset list|catalog|install|use|remove|verify|path
 1. `packages/cli/scripts/build.mjs` —— 加第二个 esbuild 入口（现 `buildCli()` 硬编码 `entryPoints: [src/main.ts]` / `outfile: dist/zcode.cjs`）；**新入口不得 import `run.ts` / `@zcode/bootstrap` / `@zcode/core`**（`main.ts:70-72` 的注释自陈"先导入 run 会求值 Agent、工具注册表和工作流模块"）—— 这是"独立二进制不带 agent 运行时"的**唯一可执行约束**。
 2. `packages/cli/package.json` 的 `bin` 加一项（`files` 不用改，`dist` 已覆盖）。
 3. `scripts/build-zcode.mjs` —— 拷第二个 bundle 进 `agent/`，并让 runner 按 `argv[0]` 路由（或加第二个 runner）。
+   ⇒ **已实现：加第二个 runner**（`scripts/zcode-distribution/infr-manage-runner.mjs`）。⚠️ **不选 argv[0] 路由**：两个 bin 的 argv 语义**不可混**——`zcode` 的旗标表是 `strict: true` 且 `-p` 已被 `--prompt` 占用，而 `zcode-infr-manage` 有自己的旗标表（§7.3）。argv[0] 路由会让两个语义共用一条分派路径，回归时无法分辨"是哪个 bin 的行为"。第二个 runner 各写各的 argv，互不影响。
 4. `scripts/zcode-distribution/installer.mjs` —— 写第二个 shim。
    ⇒ 配套测试 `scripts/zcode-distribution.test.mjs` / `zcode-distribution-smoke.mjs` 也要改。
 
@@ -635,8 +701,6 @@ export interface LocalParseRequest {
   readonly outputDir?: string;
   /** 显式指定档位；不给 = 用 MinerU 的 `default_request_tier`。 */
   readonly tier?: MineruTier;
-  /** 语言列表（MinerU 的语言词表，如 ["ch"]）。 */
-  readonly langList?: readonly string[];
 }
 
 /** 失败形态。⚠️ 上一版没有这个字段，导致验收 A4/A5/A6 无法通过。 */
@@ -657,6 +721,13 @@ export interface LocalParseOutput {
   readonly structuredContentPath?: string;
   /** 扫描产物目录得到的实际中间结果路径。 */
   readonly middleJsonPath?: string;
+  /**
+   * 图片等资源所在的目录（可能不存在）。
+   * ⚠️ 必须**落在 markdown 所在目录之内**（同级或其子目录）——markdown 的图片引用是
+   * 相对路径（`![](images/page_0_image_0.jpg)`），只搬三个文档文件 = 图片全断。
+   * 消费方按 `relative(markdownDir, assetsDir)` 还原目录名再一起搬。
+   */
+  readonly assetsDir?: string;
 }
 
 export interface LocalParseResult {
@@ -672,8 +743,15 @@ export interface LocalParseResult {
   /** 人话告警（降级原因等）。 */
   readonly warnings: readonly string[];
   readonly durationMs: number;
+  /**
+   * 引擎自己的 stdout（人读文本，**不是 JSON**）。
+   * ⚠️ 消费方**不得**把它当 JSON 解析 —— 它只能当进度信息写到 stderr（验收 A10）。
+   */
+  readonly stdout?: string;
 }
 ```
+
+⚠️ **`langList` 已从契约里删除** —— 实测 `mineru-kit parse --help` **没有语言选项**（语言是模型侧的自动判定，不接受调用方指定）。⇒ 契约里留一个引擎不认的字段，等于给出一个"传了也没用"的假旋钮。⚠️ MinerU 的语言词表（`ch` / `en` / …）与 ZCode 现有 `languages`（`chi_sim` / `eng`）的映射**整体挪到二期**（原 O3 仍开放，但前提从"透传"改成"等引擎支持指定语言再说"）。
 
 ⚠️ **产物路径必须由实现扫描产物目录得到**，不得硬编码文件名（§5.5）。
 
@@ -690,7 +768,8 @@ export interface LocalParseResult {
     "outputDir": "/work/扫描件.pdf.mineru",
     "markdownPath": "/work/扫描件.pdf.mineru/markdown.md",
     "structuredContentPath": "/work/扫描件.pdf.mineru/structured_content.json",
-    "middleJsonPath": "/work/扫描件.pdf.mineru/middle_json.json"
+    "middleJsonPath": "/work/扫描件.pdf.mineru/middle_json.json",
+    "assetsDir": "/work/扫描件.pdf.mineru/images"      // ⚠️ 有裁剪图时才有
   },
   "warnings": ["档位 advanced 在本机不可用（pdf_image_tiers 不含），已用 basic"],
   "durationMs": 8261
@@ -700,7 +779,7 @@ export interface LocalParseResult {
 {
   "ok": false,
   "error": {
-    "code": "engine_unavailable",
+    "code": "unavailable",                                  // ⚠️ 归一后的能力码，不是内部码
     "message": "未找到 mineru-kit 可执行文件",
     "hint": "安装：uv tool install --python 3.12 \"mineru>=4.0,<5\"",
     "details": { "engineCode": "engine_unavailable", "searched": ["PATH", "~/.local/bin", ".venv/bin"] }
@@ -710,7 +789,7 @@ export interface LocalParseResult {
 }
 ```
 
-⚠️ **ZCode 自己的 stdout 是上面这样的单个 JSON 对象**；⚠️ **MinerU 的 stdout 是人读文本**（`已解析 1 个输入。`），**不得当 JSON 解析**（M4）。
+⚠️ **`error.code` 对外是归一后的能力码，内部码在 `details.engineCode`**（§7.6）—— 业务方按能力码分支，运维按内部码定位。⚠️ **ZCode 自己的 stdout 是上面这样的单个 JSON 对象**；⚠️ **MinerU 的 stdout 是人读文本**（`已解析 1 个输入。`），**不得当 JSON 解析**（M4）⇒ **那段文本走 stderr**（当进度信息），不混进 stdout 的 JSON（验收 A10）。
 
 ### 7.6 错误码与退出码
 
@@ -726,6 +805,15 @@ export interface LocalParseResult {
 | `input_invalid` | 文件不存在 / 格式不支持 | `not_found` / `unsupported_input` |
 
 ⚠️ **统一用 `process_failed`，不用 `engine_failed`** —— tesseract 路线已有的就是 `process_failed`（`ocr-local.md` §8），两个名字指同一件事会让按 `details.engineCode` 分支的业务方漏掉一侧。
+
+⚠️ **两层各有一份码，职责不同**（验收 A4 的形状由这两层共同决定）：
+
+| 层 | `error.code` 取值 | 内部码在哪 |
+| --- | --- | --- |
+| **端口层**（`LocalInfraError`） | **内部码**（`engine_not_found` / `engine_unavailable` / `process_failed` / `artifact_missing` / `timeout` / `input_invalid`） | 就在 `code` 里 |
+| **命令面**（`zcode-infr-manage parse --json`） | **归一后的能力码**（上表右列） | `details.engineCode` |
+
+⇒ **验收 A4 在命令面上的形状是 `error.code = "invalid_input"` + `details.engineCode = "engine_not_found"`**（不是 `error.code = "engine_not_found"`）。⚠️ **命令面不得预校验档位**：预校验会让这个形状出不来（命令面拦下时只有自己的码，没有引擎的内部码），所以档位枚举的判定**只在端口层做一次**，且必须发生在**任何 spawn 之前**。
 
 ⚠️ **`input_invalid` 的二选一规则要写死**：
 - 文件**不存在** → `not_found`
@@ -829,7 +917,7 @@ OCR 能力的引擎选择**不再由能力层做**：能力把文档交给 `loca
 | `psm` / `preprocess` / `thresholdingMethod` / `noWords` | **明确拒绝**（报错），不静默忽略 —— 它们是 tesseract 专属 |
 | `pages`（"all" / "auto" / "1-5,8"） | MinerU 走**整份文档**语义；子集需求用 MinerU 自己的 `--pages` 表达，不复用该字段 |
 | `strategy`（"fill" / "override"） | MinerU 不区分 → **明确拒绝** |
-| `languages`（`chi_sim` / `eng`） | → 映射到 MinerU 的 `langList` 词表（**两套词汇表，必须显式映射，不能同名直传**） |
+| `languages`（`chi_sim` / `eng`） | ⏸️ **暂不支持**：实测 `mineru-kit parse` **没有语言选项** ⇒ 二期等引擎支持指定语言后，再做"两套词汇表必须显式映射、不能同名直传"的映射表 |
 | `dpi` | MinerU 自行决定渲染分辨率 ⇒ **明确拒绝** |
 | `password` | 沿用 `ocr-local.md` §3 的严规矩：只经 argv、不落盘不入日志、MCP / 内置工具投影必须拒绝 |
 
@@ -870,7 +958,7 @@ OCR 能力的引擎选择**不再由能力层做**：能力把文档交给 `loca
 
 | 编号 | 场景 | 断言 | 落点 |
 | --- | --- | --- | --- |
-| A0 | **真实 MinerU 环境**跑一次 `mineru-kit parse` | ✅ **已实测通过**（§11.0）：中文全部识别正确、8.26s、产物三件套齐 | 手工 |
+| A0 | **真实 MinerU 环境**跑一次 `mineru-kit parse` | ✅ **已实测通过**（§11.0）：中文全部识别正确、8.26s、产物三件套齐。⚠️ **2026-11-09 用真实二进制复核**：真实 `mineru-kit` 4.1.7 + 真实 PDF → `ok = true`、12.7s、三件套齐、`tier` 从产物回填为 `standard`、`stdout` 是单个 JSON 对象（MinerU 的人读输出在 stderr） | 手工 |
 | A1 | 环境里没有 MinerU，`doctor --json` | 退出码 **0**；`available = false`；带 `reason` + `fix`（装法）；`weightsFetched = false`；**无任何下载发生** | adapters |
 | A2 | 只配了 `ocr.mineruPath`（不在 PATH） | `doctor` 仍能找到并报为可用 | adapters |
 | A3 | 显式 `--tier advanced`，本机 `pdf_image_tiers` 不含它 | **降到 `ceiling`** 并执行**一次**；`degradedFrom = "advanced"`；`warnings[]` 含原因；`result.tier` = 实际用的档位 | adapters |
@@ -879,13 +967,25 @@ OCR 能力的引擎选择**不再由能力层做**：能力把文档交给 `loca
 | A6 | fake 引擎**非零退出** | 报失败（`process_failed`）；**不得**自动换档重跑 | adapters |
 | A7 | 多页 **PDF** | 断言调用参数含 **`--pages all`**；产物是**一份**整文档产物 | adapters |
 | A8 | **图片**输入 | 断言调用参数**不含** `--pages`；解析成功 | adapters |
-| A9 | `zcode-infr-manage asset` 各子命令 | 语义与 `model-assets.md` §5 一致（仅前缀变化） | cli |
+| A9 | `zcode-infr-manage asset` 各子命令 | ⏸️ **v1 延期**：`asset` 命令组不实现（阻塞项见 §7.3 的 7 条待决） | cli |
 | A10 | stdout 契约 | `--json` 时 stdout 是**单个可解析的 JSON 对象**；进度信息只在 stderr；**MinerU 自己的 stdout 是人读文本，不当 JSON 解析** | cli |
 | A11 | **代理环境变量存在时**（`ALL_PROXY=socks5://…`） | 下载子进程里代理被剥离（§7.9）；解析子进程不受影响 | adapters |
 | A12 | **产物文件名随版本变** | 分类按**内容**不按文件名（§5.5）；解包前清空目标目录 | adapters |
 | A13 | **一次调用** | 只 spawn **一次** `mineru-kit parse`（一次付冷启动），三件套一次取全 | adapters |
 | A14 | 临时 zip 路径**不带 `.zip` 后缀** | 必须报错或补后缀，**不得**让 MinerU 建目录（否则产物找不到） | adapters |
 | A15 | zip 含**恶意条目名**（`../`、绝对路径） | 解包拒绝，不写到目标目录之外 | adapters |
+
+⚠️ **A4 的两处码** —— 表里写的 `error.code = "invalid_input"` 是**命令面**的形状（`zcode-infr-manage parse --json`）；**端口层**返回的是内部码 `engine_not_found`（§7.6 的两层码）。两侧都要断言。
+
+**回归覆盖现状（2026-11-09）**：
+
+| 落点 | 文件 | 覆盖 |
+| --- | --- | --- |
+| adapters | `packages/adapters/tests/local-infra/local-infra.test.ts` | A1、A2、A3、A5、A6、A7、A8、A11、A12、A13、A14、A15 + 输入校验（not_found / unsupported_input）+ assetsDir 不变式 |
+| adapters | `packages/adapters/tests/local-infra/locator-and-tier.test.ts` | 引擎定位（PATH / 配置路径 / 找不到）+ 档位判定（默认值 / 降级 / 非法档位 / 内存闸门） |
+| cli | `packages/cli/tests/infr-manage-command.test.ts` | A4（命令面形状 + 不预校验）、A5、A6（命令面形状）、A10（stdout 单 JSON / 进度走 stderr）、退出码 0/1/124、`doctor` 只读、`models download` 档位约束 |
+
+⇒ **A0 仍是手工**（真实 MinerU 环境），**A9 延期**（§7.3）。
 
 ---
 
@@ -914,7 +1014,7 @@ OCR 能力的引擎选择**不再由能力层做**：能力把文档交给 `loca
 | --- | --- | --- |
 | O1 | `zcode-infr-manage` 与 `zcode` 同属 `@zcode/cli` 包，两个 bin 的版本升级与发布节奏要不要绑死 | 待定（实现者） |
 | O2 | 产物目录默认名 `<源文件名>.mineru/` 是否要进 workspace `.gitignore` | 待定（与 `ocr-local.md` §11 的 sidecar 讨论一起做） |
-| O3 | MinerU 的语言词表（`ch` / `en` / …）与 ZCode 现有 `languages` 的**完整映射表** | 二期（v1 只透传 `langList`） |
+| O3 | MinerU 的语言词表（`ch` / `en` / …）与 ZCode 现有 `languages` 的**完整映射表** | 二期（⚠️ v1 **不透传** —— 实测 `mineru-kit parse` 没有语言选项） |
 | O4 | 服务端若调用 MinerU，需显著标注"MinerU 被使用"（§3.4）——服务端 RAG 落地时要处理 | 服务端 RAG 那个 spec |
 | O5 | v1 的产物要不要同时被 `office-runtime` 读（扫描件 PDF 打开能出文字） | v2（§1 范围的产品空洞） |
 | O6 | ✅ **已由实测回答**：Doclib 路线给不了结构化块 ⇒ **v1 走无状态路线**（D9 修订） | 已决（2026-11-08） |
@@ -922,20 +1022,22 @@ OCR 能力的引擎选择**不再由能力层做**：能力把文档交给 `loca
 | O8 | MinerU 的 `middle_json.json` 是否还需要消费（`structured_content.json` 已够用） | 待定（二期） |
 | O9 | `mineru` 与 `mineru-kit` 的 sibling 推导在没有 `mineru-kit` 的安装布局下怎么办（用户可能只装了其中一个） | 待定（doctor 降级为"只报版本检查不可用"） |
 | O10 | `zcode-infr-manage` 是否也需要 `zcode` 那套遥测 / i18n | 待定（实现者） |
+| O11 | `asset` 命令组的 7 条待决（目录地址 / 签名 / 与模型仓库的关系 / 落盘位置 / `--offline` 语义 / `asset use` 写哪份配置 / 资产分类维度）—— §7.3 | 待决（产品 / 运维） |
+| O12 | **Windows 侧的补充实测**：`.exe` 布局、`ceiling` / `device` 在 CUDA（显存 < 8GB）下的取值、zip 里的 `images/` 是否一致、临时目录清理、首次运行真实耗时、1.2GB 权重的完整下载耗时、一次真实的 Doclib 运行 | 待补（2026-11-09 起在 Windows 机器上验证） |
 
 ---
 
 ## 10. 同步清单（改 spec 时要一起动的地方）
 
-| 文件 | 要改什么 |
-| --- | --- |
-| `ocr-local.md` | §3 `OcrCapabilityInput`（补 `engine` / `tier` 字段；补 `dpi` 在 MinerU 路径的处置）；§3 `OcrCapabilityOutput`（**删掉重复声明**，只留一份联合类型，补 `tier` / `degradedFrom` / `sidecarPath` / `middleJsonPath`）；§4 引擎契约；§5 流水线；§6 sidecar（两变体、bbox 单位列、`engine.variant` 补进 v1 示例、补 v2 示例 JSON、tier 枚举补 `flash`）；§7 **状态所有者**（补 MinerU 行）；§8 错误表（补齐 6 个内部码，统一 `process_failed`）；§9 跨平台（代理、查找顺序）；§11 未决问题 4 |
-| `model-assets.md` | §5 **接入点 2/3 改为独立 bin 的 argv 解析**（不再进 `zcode` 的 `run.ts` 分派表、不再注册 `--offline` 到 `zcode` 全局旗标）；§11 **状态所有者**；§12 命令面；§14 开放问题 7（已结）+ 清掉 `server` 命令组与悬空的"§5 例外条款"引用 |
-| `capability-registry.md` | §3 `CapabilityPorts` 加 `localInfra`；§5 状态所有者（产物落盘归 adapter）；§7 **错误映射表补齐 6 个内部码**；投影 C 的超时预算加 MinerU 豁免（`:328` 的"单页 120s / 整批 30min"不能套用） |
-| `commands.md` | §53 的"唯一进程级入口"例外（**已写好**）；`parse` 的旗标统一为 `--path` / `--output` / `--tier` / `--json` |
-| `knowledge-rag.md` | §12 命令面表（**已改**） |
-| `model/http-proxy.md` | ⚠️ **登记 §7.9 的"下载子进程剥离代理"例外**（否则与本 spec 的 `:9` 口径矛盾） |
-| `architecture-policy.yaml` | ⚠️ **列入同步清单**：新增 `.ts` 要 adopt 或逐文件例外（R6） |
+| 文件 | 要改什么 | 状态（2026-11-09） |
+| --- | --- | --- |
+| `ocr-local.md` | §3 `OcrCapabilityInput`（补 `engine` / `tier` 字段；补 `dpi` 在 MinerU 路径的处置）；§3 `OcrCapabilityOutput`（**删掉重复声明**，只留一份联合类型，补 `tier` / `degradedFrom` / `sidecarPath` / `middleJsonPath`）；§4 引擎契约；§5 流水线；§6 sidecar（两变体、bbox 单位列、`engine.variant` 补进 v1 示例、补 v2 示例 JSON、tier 枚举补 `flash`）；§7 **状态所有者**（补 MinerU 行）；§8 错误表（补齐 6 个内部码，统一 `process_failed`）；§9 跨平台（代理、查找顺序）；§11 未决问题 4 | ⏸️ **未改**：v1 不接 OCR 能力（§1 已声明），等接线时一起改 |
+| `model-assets.md` | §5 **接入点 2/3 改为独立 bin 的 argv 解析**（不再进 `zcode` 的 `run.ts` 分派表、不再注册 `--offline` 到 `zcode` 全局旗标）；§11 **状态所有者**；§12 命令面；§14 开放问题 7（已结）+ 清掉 `server` 命令组与悬空的"§5 例外条款"引用 | ⏸️ **未改**：`asset` 命令组整体延期（§7.3 的 7 条待决），改它要等那些决策落地 |
+| `capability-registry.md` | §3 `CapabilityPorts` 加 `localInfra`；§5 状态所有者（产物落盘归 adapter）；§7 **错误映射表补齐 6 个内部码**；投影 C 的超时预算加 MinerU 豁免（`:328` 的"单页 120s / 整批 30min"不能套用） | ⏸️ **未改**：`capabilities` 包与 `cap` 分派都不存在（§1.1 核查），v1 不接线 |
+| `commands.md` | §53 的"唯一进程级入口"例外（**已写好**）；`parse` 的旗标统一为 `--path` / `--output` / `--tier` / `--json` | ✅ 已写（例外）；旗标与实现一致 |
+| `knowledge-rag.md` | §12 命令面表（**已改**） | ✅ 已改 |
+| `model/http-proxy.md` | ⚠️ **登记 §7.9 的"下载子进程剥离代理"例外**（否则与本 spec 的 `:9` 口径矛盾） | ✅ **已登记**（2026-11-08 同步时写入）；2026-11-09 补正两处表述：这条是 **SOCKS 专属**故障（HTTP 代理不触发），且**不写死"应该用哪个模型源"** |
+| `architecture-policy.yaml` | ⚠️ **列入同步清单**：新增 `.ts` 要 adopt 或逐文件例外（R6） | ✅ **已登记** `local-infra-unmanaged-files` 例外（16 个新文件，2026-11-09） |
 
 ⚠️ **AGENTS.md 纪律**：新增或修改行为前先更新对应 spec。本 spec 落定后，**先改上面这几份，再写代码**。
 
@@ -1072,6 +1174,8 @@ OCR 能力的引擎选择**不再由能力层做**：能力把文档交给 `loca
 | --- | --- | --- |
 | v2 | 2026-11-08 | **四路对抗审查后重写（第一轮）。** 修正 5 处事实性错误（`--pages` 只对 PDF；`--output` 收目录的真实语义；`@zcode/cli` 的 `bin` 不会被物化；档位判据自相矛盾；`.pick()` 会抛导致 CLI 启动即死）；补齐 11 个阻断级契约缺口（端口失败通道、DI 注入、超时与 `ExecutionPort` 的匹配、`OcrCapabilityOutput` 双声明、降级对外落点、错误码闭集、`parse` 退出码、旗标名统一、产物字段名、产物落盘 owner、两个命令面的定位）；补 M12~M15 四条决定 |
 | **v3** | **2026-11-08** | **第四路（证据充分性）审查后修订。** 这一路自己造了 12 页带表格/图片/公式的样本、三档各跑一遍，**推翻了我"实测事实"表里的 6 条结论**：<br>① **markdown 没有 `<!-- page N of M -->` 页锚点** —— 上一版把 Doclib `mineru parse` 的特征误归给 `mineru-kit`（4 个产物 `<!--` 计数全 0）⇒ 页面引用只能靠 `page_idx`<br>② **块类型是开放集合且随档位变**（`text`/`paragraph_title`/`table`/`image`/**`chart`**；advanced 把图叫 `chart`、standard 叫 `image`）⇒ `type` 不能是封闭枚举<br>③ **产物集合随内容变化**（3 / 5 / 27 个条目）⇒ 漏了 `images/` 会让 markdown 的图片链接全断<br>④ **`ceiling` 是分级规则不是能力上限**（只看 CPU 核数 + 有无加速器，**不查内存/显存**）⇒ 与 §5.1 的内存表自相矛盾<br>⑤ **性能数字差 100~400 倍**（边际 0.314s/页，不是 30~120s/页；"冷启动 123.5s"是首次一次性成本，predictor 初始化实测只要 0.66~1.48s）<br>⑥ **D9/O6 的措辞依据不足**（Doclib 那列根本没跑通）⇒ 从"实测证明给不了"降级为"CLI 表面不暴露"<br>另修：§11.0 全面加**样本列**（S1~S4），无样本支撑的结论一律标"未实测"并挪进 §11.1；补"绝不传 `--remote`/`--remote-url`/`--api-key`"硬规则；补 CA 变量维度；补 Doclib 遥测默认开启；补许可结论未 pin 版本 |
+
+| **v4** | **2026-11-09** | **v1 实现落地后的规格同步。** ① Status 改为"v1 已实现"并补实施状态表；② §7.1 端口契约补 `config` / `pdf` 两个可选依赖、`MINERU_TIERS` / `MineruProxyPolicy` / `downloadModels`；③ §7.3 命令面把 `asset` 组**延期**（列出 7 条阻塞决策：目录地址只有占位 URL、签名校验、落盘位置、`--offline` 语义等），新增 `models download` 子命令（MinerU 只接受 `basic` / `standard`），并记录分发链**选第二个 runner**（不选 argv[0] 路由：两个 bin 的 argv 语义不可混）；④ §7.5 删掉 `langList`（实测 `mineru-kit parse` **没有语言选项**），补 `assetsDir` 与 `stdout` 字段，并把 JSON 样例的 `error.code` 改成**归一后的能力码**（内部码在 `details.engineCode`）；⑤ §7.6 补"两层码各司其职"表，澄清验收 A4 在端口层与命令面的**不同形状**；⑥ §5.5 修正产物分类规则（实测 `structured_content.json` 与 `middle_json.json` **同形**，"顶层有 pages"区分不了 ⇒ 先判 `schema` / `schema_version` / `pdf_info` 再判 structured）；⑦ §8 补回归覆盖现状表（A0 手工、A9 延期）；⑧ §9.2 补 O11（asset 待决）与 O12（Windows 补充实测）；⑨ §10 同步清单补状态列；⑩ `model/http-proxy.md` 补正两处表述（SOCKS 专属、不写死模型源） |
 
 ⚠️ **审查发现的问题分布**：契约一致性 11 阻断 + 12 高 + 6 低；架构合规 3 P0 + 12 P1 + 3 P2；实现可行性 5 P0 + 13 P1 + 7 P2；证据充分性 7 P0 + 9 P1 + 9 P2。
 

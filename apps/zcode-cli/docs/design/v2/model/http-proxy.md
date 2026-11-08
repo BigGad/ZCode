@@ -39,7 +39,11 @@ No Proxy 对以上代理来源都生效，支持 `*`、精确 host、host:port�
 
 运行时继承环境会过滤 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`、`NODE_EXTRA_CA_CERTS` / `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` / `CURL_CA_BUNDLE` / `GIT_SSL_CAINFO` 以及包管理器代理/CA 变量。过滤前会把这些用户 shell 网络变量封存到 ZCode 内部 `ZCODE_TOOL_ENV_PASSTHROUGH_JSON`；该变量不参与 app/provider/通用 `HttpClientPort` 的代理解析，只作为 `WebFetch` 专用 fallback，或在 tool 子进程环境构造时恢复。
 
-⚠️ **例外：本地模型工具链的下载子进程默认剥离代理**。MinerU（`mineru-kit`）的 httpx 读到 SOCKS 代理会因缺 `socksio` 直接失败（实测：`Using SOCKS proxy, but the 'socksio' package is not installed`），而模型源直连 ModelScope 在国内可用、直连 HuggingFace 超时。⇒ `zcode-infr-manage` 拉起 `mineru-kit models download` 时**默认剥离** `ALL_PROXY` / `all_proxy` / `http_proxy` / `https_proxy` / `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` / `no_proxy`，可用 `ocr.mineruProxy: "inherit"` 改回继承。
+⚠️ **例外：本地模型工具链的下载子进程默认剥离代理**。MinerU（`mineru-kit`）的 httpx 读到 **SOCKS** 代理会因缺 `socksio` 直接失败（实测：`Using SOCKS proxy, but the 'socksio' package is not installed`）。⇒ `zcode-infr-manage` 拉起 `mineru-kit models download` 时**默认剥离** `ALL_PROXY` / `all_proxy` / `http_proxy` / `https_proxy` / `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` / `no_proxy`，可用 `ocr.mineruProxy: "inherit"` 改回继承。
+
+⚠️ **这是 SOCKS 专属故障** —— httpx 只在读到 SOCKS 代理时需要 `socksio`；**HTTP/HTTPS 代理不会触发这个报错**。⇒ 本例外的作用是"避免 SOCKS 代理打断下载"，**不是"所有代理都要剥"**：用户若只有 HTTP 代理，剥了反而可能让本来能下的模型下不来 ⇒ 所以才有 `ocr.mineruProxy` 这个开关。
+
+⚠️ **不写死"应该用哪个模型源"** —— MinerU 的 `model.source` 默认是 `huggingface`，且经 `mineru-kit models download` 的**完整下载已实测走通**（三个仓库共 2.9GB 全部就绪）。⇒ 本条只陈述事实，不建议用户改模型源；下载失败时的处置由 `local-infra.md` §7.9 的 `doctor` 提示给出（可试 `--source modelscope`）。
 
 ⇒ 这条**只作用于该下载子进程**，不改变上面「子进程先恢复用户 shell 网络变量」的通则；**解析子进程不受影响**（模型就绪后 `mineru-kit parse` 是纯本地推理，不联网）。规格见 [`local-infra.md`](../local-infra.md) §7.9。
 
@@ -88,3 +92,4 @@ No Proxy 对以上代理来源都生效，支持 `*`、精确 host、host:port�
 - stdio MCP server 能继承统一网络环境，HTTP/SSE MCP transport 能获得 proxy-aware fetch。
 - 走代理时上游回 `999` / `204` / `304`：`HttpClientPort` 带回原状态码（204 / 304 正文为空）；proxy-aware fetch 对 204 / 304 返回空正文的 `Response`，对 `999` 以 `ZCODE_UNSUPPORTED_HTTP_STATUS` 失败；两者都不产生 uncaughtException（`packages/adapters/tests/http-response-status.test.ts`）。
 - 架构测试扫描进程内源码，防止新增直接 HTTP 出口绕过统一网络边界。
+- `zcode-infr-manage models download` 的子进程默认剥离 8 个代理变量名，`ocr.mineruProxy: "inherit"` 时不剥离；`mineru-kit parse` 的解析子进程不受影响（`apps/zcode-cli/packages/adapters/tests/local-infra/local-infra.test.ts`）。
