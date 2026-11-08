@@ -162,14 +162,69 @@ export const buildCli = async ({
   }),
 } = {}) => {
   const cliVersion = await version;
-  const outfile = resolve(cliDirectory, "dist/zcode.cjs");
-  const sourcemapFile = `${outfile}.map`;
 
   await stageBuiltinProviderConfig({
     root: resolve(rootDirectory, "../.."),
     directory: resolve(cliDirectory, "dist/provider"),
     env,
   });
+
+  await buildBundle({
+    cliDirectory,
+    rootDirectory,
+    entry: "src/main.ts",
+    outfile: "dist/zcode.cjs",
+    minify,
+    sourcemap,
+    cliVersion,
+  });
+
+  // zcode.cjs 内联了第三方代码；dist 旁的伴随声明供发行 CLI 与统一分发包（build-zcode）复制。
+  await stageThirdPartyNotices(resolve(cliDirectory, "dist"), resolve(rootDirectory, "../.."));
+};
+
+/**
+ * `zcode-infr-manage` 的第二个 esbuild 入口（spec：docs/design/v2/local-infra.md §7.3）。
+ *
+ * ⚠️ **入口不得 import `run.ts` / `@zcode/bootstrap` / `@zcode/core`** ——
+ * 那会求值 Agent 运行时、工具注册表与工作流模块，把整套业务依赖打进这个
+ * 独立二进制。这是"独立二进制不带 agent 运行时"的唯一可执行约束。
+ *
+ * ⚠️ 第三方声明沿用 `dist/THIRD-PARTY-NOTICES.md`（`buildCli()` 写的那份）：
+ * 两个 bundle 内联的第三方代码集合同源，重复写会互相覆盖。
+ */
+export const buildInfrManage = async ({
+  cliDirectory = cliRoot,
+  rootDirectory = projectRoot,
+  minify = false,
+  sourcemap = true,
+  version = readRootPackageVersion({
+    root: rootDirectory,
+  }),
+} = {}) => {
+  await buildBundle({
+    cliDirectory,
+    rootDirectory,
+    entry: "src/infr-manage/main.ts",
+    outfile: "dist/zcode-infr-manage.cjs",
+    minify,
+    sourcemap,
+    cliVersion: await version,
+  });
+};
+
+/** 两个入口共用的 esbuild 配置 —— 参数不同、配置必须同源，否则两份产物行为漂移。 */
+const buildBundle = async ({
+  cliDirectory,
+  rootDirectory,
+  entry,
+  outfile,
+  minify,
+  sourcemap,
+  cliVersion,
+}) => {
+  const outfilePath = resolve(cliDirectory, outfile);
+  const sourcemapFile = `${outfilePath}.map`;
 
   await build({
     banner: {
@@ -179,7 +234,7 @@ export const buildCli = async ({
     define: {
       __CLI_VERSION__: JSON.stringify(cliVersion),
     },
-    entryPoints: [resolve(cliDirectory, "src/main.ts")],
+    entryPoints: [resolve(cliDirectory, entry)],
     // Ink 7 and yoga-layout use top-level await, so the CJS CLI bundle loads the TUI
     // through Node's native dynamic import path instead of forcing esbuild to lower it.
     // playwright-core 依赖运行时 package assets 与 require.resolve，相比内联 bundle 必须保持外置。
@@ -198,7 +253,7 @@ export const buildCli = async ({
     minify,
     metafile: true,
     plugins: [createZodDedupePlugin({ expectedV4Version: await readZodBuildVersion() })],
-    outfile,
+    outfile: outfilePath,
     platform: "node",
     sourcemap,
     // target 取所有承载运行时里最低的 Node 版本：桌面用 Electron 内置 Node 24，
@@ -212,12 +267,12 @@ export const buildCli = async ({
     await rm(sourcemapFile, { force: true });
   }
 
-  await chmod(outfile, executableFileMode);
-  // zcode.cjs 内联了第三方代码；dist 旁的伴随声明供发行 CLI 与统一分发包（build-zcode）复制。
-  await stageThirdPartyNotices(resolve(cliDirectory, "dist"), resolve(rootDirectory, "../.."));
+  await chmod(outfilePath, executableFileMode);
 };
 
 const entryPath = process.argv[1];
 if (entryPath && import.meta.url === pathToFileURL(entryPath).href) {
-  await buildCli(resolveBuildOptions(process.argv.slice(2)));
+  const options = resolveBuildOptions(process.argv.slice(2));
+  await buildCli(options);
+  await buildInfrManage(options);
 }

@@ -4,6 +4,7 @@ import type { CollaborationMode } from "../interfaces/session.port.js";
 import type { McpServerConfig } from "../interfaces/mcp.port.js";
 import type { HooksRuntimeConfig, HooksRuntimeConfigPatch } from "../hooks/index.js";
 import type { PluginConfig, PluginOptionValues } from "../plugins/index.js";
+import type { MineruProxyPolicy } from "../interfaces/local-infra.port.js";
 
 // ============================================================
 // Config Key Types
@@ -274,6 +275,26 @@ export interface RuntimeConfigPatch {
   modelAnomalyGuard?: Partial<RuntimeConfig["modelAnomalyGuard"]>;
   hooks?: HooksRuntimeConfigPatch;
   ui?: Partial<RuntimeConfig["ui"]>;
+  /**
+   * 本地解析引擎配置（spec：docs/design/v2/local-infra.md §7.7）。
+   * ⚠️ 只挂在 Patch 上，不进 `RuntimeConfig`：它是**进程级一次性**的引擎定位信息，
+   * 不是会话运行期状态，进 RuntimeConfig 会让每个 session 都带着一份用不上的字段。
+   */
+  ocr?: OcrRuntimeConfig;
+}
+
+/**
+ * `ocr` 配置段。
+ * ⚠️ `mineruPath` **只指向 `mineru-kit`**（干活的 CLI）；`mineru`（版本检查）是另一个
+ * 不重叠的独立 CLI，由同目录 sibling 推导。
+ */
+export interface OcrRuntimeConfig {
+  mineruPath?: string;
+  mineruProxy?: MineruProxyPolicy;
+  /** tesseract 引擎路径（`ocr-local.md` §9）。v1 不接 tesseract，先占位避免配置被 strict 校验拒绝。 */
+  enginePath?: string;
+  /** poppler 可执行路径（`ocr-local.md` §9）。v1 不接，先占位。 */
+  popplerPath?: string;
 }
 
 export type SupportedLocale = "en-US" | "zh-CN";

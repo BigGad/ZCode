@@ -133,6 +133,11 @@ export function mergeConfigs(...configs: PrioritizedConfig[]): RuntimeConfigPatc
     if (config.logging) {
       result.logging = { ...result.logging, ...config.logging };
     }
+    if (config.ocr) {
+      // 逐字段合并：用户层只写 mineruPath、项目层只写 mineruProxy 时，
+      // 整体覆盖会丢掉其中一层。工程配置优先级（CLI > 项目 > 用户）由本函数的排序保证。
+      result.ocr = { ...result.ocr, ...config.ocr };
+    }
     if (config.toolConcurrency) {
       result.toolConcurrency = { ...result.toolConcurrency, ...config.toolConcurrency };
     }

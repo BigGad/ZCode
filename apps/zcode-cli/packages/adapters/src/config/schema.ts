@@ -43,6 +43,27 @@ const memorySchema = z.object({
   use: z.boolean().optional(),
 });
 
+/**
+ * 本地解析引擎配置（spec：docs/design/v2/local-infra.md §7.7）。
+ *
+ * ⚠️ `mineruPath` **只指向 `mineru-kit`**（干活的那个：parse / hardware detect / models）。
+ * `mineru`（版本检查用）是另一个不重叠的独立 CLI，由同目录 sibling 推导。
+ */
+export const ocrConfigSchema = z
+  .object({
+    mineruPath: z.string().optional(),
+    /**
+     * 下载子进程的代理策略。`strip`（默认）剥掉代理变量直连；`inherit` 原样继承。
+     * ⚠️ 只对「下载」生效——解析是纯本地推理，不联网。
+     */
+    mineruProxy: z.enum(["strip", "inherit"]).optional(),
+    /** tesseract 引擎路径（`ocr-local.md` §9）。v1 不接 tesseract，先占位避免配置被 strict 校验拒绝。 */
+    enginePath: z.string().optional(),
+    /** poppler 可执行路径（`ocr-local.md` §9）。v1 不接，先占位。 */
+    popplerPath: z.string().optional(),
+  })
+  .strict();
+
 const mcpServerBaseSchema = {
   alwaysLoad: z.boolean().optional(),
   // Host DTO 和连接池已有 isolation；文件解析不能丢弃整条已支持的声明。
@@ -307,6 +328,7 @@ export const ZCodeConfigFileSchema = z
     toolConcurrency: toolConcurrencySchema.optional(),
     modelAnomalyGuard: modelAnomalyGuardSchema.optional(),
     hooks: hooksSchema.optional(),
+    ocr: ocrConfigSchema.optional(),
   })
   .passthrough();
 
@@ -317,6 +339,10 @@ const projectConfigFileSchema = ZCodeConfigFileSchema.pick({
   hooks: true,
   skill: true,
   command: true,
+  // ⚠️ `ocr` 必须在 `ZCodeConfigFileSchema` 里**先**存在，才能被 pick。
+  // zod v4 的 `.pick()` 遇到不存在的键直接抛 `Unrecognized key`，那会让 schema.ts
+  // import 即抛 ⇒ 整个 CLI 启动即死，且报错点离改动点很远。
+  ocr: true,
 })
   .extend({
     plugins: pluginsSchema.pick({ enabledPlugins: true, options: true }).optional(),
@@ -451,6 +477,7 @@ function parsedConfigFileToRuntimePatch(parsed: ZCodeConfigFile): RuntimeConfigP
   if (parsed.toolConcurrency) config.toolConcurrency = parsed.toolConcurrency;
   if (parsed.modelAnomalyGuard) config.modelAnomalyGuard = parsed.modelAnomalyGuard;
   if (parsed.hooks) config.hooks = parsed.hooks;
+  if (parsed.ocr) config.ocr = parsed.ocr;
 
   return config;
 }

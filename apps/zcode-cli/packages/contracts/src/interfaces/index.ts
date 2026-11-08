@@ -5,6 +5,7 @@ export * from "./file-system.port.js";
 export * from "./context-source.port.js";
 export * from "./http-client.port.js";
 export * from "./image-processor.port.js";
+export * from "./local-infra.port.js";
 export * from "./live-capture.port.js";
 export * from "./pdf-document.port.js";
 export * from "./video-frame.port.js";

@@ -11,6 +11,7 @@ export * from "./interfaces/context-source.port.js";
 export * from "./interfaces/provider-endpoint-routing.port.js";
 export * from "./interfaces/http-client.port.js";
 export * from "./interfaces/image-processor.port.js";
+export * from "./interfaces/local-infra.port.js";
 export * from "./interfaces/live-capture.port.js";
 export * from "./interfaces/pdf-document.port.js";
 export * from "./interfaces/video-frame.port.js";

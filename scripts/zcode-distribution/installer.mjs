@@ -48,8 +48,16 @@ exec node "$INSTALL_DIR/current/bin/zcode.mjs" "\\$@"
 SH
 chmod +x "$BIN_DIR/zcode"
 
+# 第二个进程级入口：本地基础设施管理（spec：apps/zcode-cli/docs/design/v2/local-infra.md §7.3）。
+cat > "$BIN_DIR/zcode-infr-manage" <<SH
+#!/usr/bin/env sh
+exec node "$INSTALL_DIR/current/bin/zcode-infr-manage.mjs" "\\$@"
+SH
+chmod +x "$BIN_DIR/zcode-infr-manage"
+
 echo "ZCode $VERSION installed."
 echo "Run: zcode (TUI) or zcode --web (Web)"
+echo "Local infra: zcode-infr-manage doctor"
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *) echo "Note: $BIN_DIR is not in PATH." ;;

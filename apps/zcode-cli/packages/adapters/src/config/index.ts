@@ -481,6 +481,13 @@ export {
   type UiLocalePatchResult,
 } from "./file-config.adapter.js";
 export { parseEnvConfig, getToolConcurrencyConfig } from "./env-config.adapter.js";
+export {
+  loadProjectConfigs,
+  loadProjectConfigFile,
+  summarizeProjectConfigs,
+  type ProjectConfigDiscovery,
+  type ProjectConfigFile,
+} from "./project-config.adapter.js";
 export { ZCodeConfigFileSchema, type ZCodeConfigFile } from "./schema.js";
 export { mergeConfigs, createPrioritizedConfig, getScopePriority } from "./config-merger.js";
 export {

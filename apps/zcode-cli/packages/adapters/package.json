@@ -38,6 +38,10 @@
       "types": "./dist/pdf/index.d.ts",
       "import": "./dist/pdf/index.js"
     },
+    "./local-infra": {
+      "types": "./dist/local-infra/index.d.ts",
+      "import": "./dist/local-infra/index.js"
+    },
     "./provider": {
       "types": "./dist/provider/index.d.ts",
       "import": "./dist/provider/index.js"

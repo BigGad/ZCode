@@ -12,6 +12,10 @@ import { installScriptSource } from "./zcode-distribution/installer.mjs";
 
 const exec = promisify(execFile);
 const runnerSource = new URL("./zcode-distribution/runner.mjs", import.meta.url);
+const infrManageRunnerSource = new URL(
+  "./zcode-distribution/infr-manage-runner.mjs",
+  import.meta.url,
+);
 
 async function fixture(t) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "zcode-distribution-")));
@@ -21,9 +25,17 @@ async function fixture(t) {
     await mkdir(join(root, name), { recursive: true });
   }
   await cp(runnerSource, join(root, "bin/zcode.mjs"));
+  await cp(infrManageRunnerSource, join(root, "bin/zcode-infr-manage.mjs"));
   await writeFile(join(root, "package.json"), JSON.stringify({ type: "module", version: "1.2.3" }));
   await writeFile(
     join(root, "agent/zcode.cjs"),
+    `
+process.stdout.write(JSON.stringify({ argv: process.argv.slice(2), entry: process.argv[1], cwd: process.cwd() }));
+process.exitCode = Number(process.env.FIXTURE_EXIT_CODE || 0);
+`,
+  );
+  await writeFile(
+    join(root, "agent/zcode-infr-manage.cjs"),
     `
 process.stdout.write(JSON.stringify({ argv: process.argv.slice(2), entry: process.argv[1], cwd: process.cwd() }));
 process.exitCode = Number(process.env.FIXTURE_EXIT_CODE || 0);
@@ -43,7 +55,12 @@ process.on('SIGTERM', () => process.exit(0));
 setInterval(() => {}, 1000);
 `,
   );
-  return { directory, root, runner: join(root, "bin/zcode.mjs") };
+  return {
+    directory,
+    root,
+    runner: join(root, "bin/zcode.mjs"),
+    infrManageRunner: join(root, "bin/zcode-infr-manage.mjs"),
+  };
 }
 
 test("default launch and CLI arguments reuse the Agent entry without starting Web", async (t) => {
@@ -60,6 +77,18 @@ test("default launch and CLI arguments reuse the Agent entry without starting We
     exec(process.execPath, [runner], { env: { ...process.env, FIXTURE_EXIT_CODE: "17" } }),
     (error) => error.code === 17,
   );
+});
+
+test("local infra manage is a second entry that keeps its own argv semantics", async (t) => {
+  const { infrManageRunner, root, directory } = await fixture(t);
+  for (const args of [["doctor"], ["parse", "--path", "a.pdf", "--json"]]) {
+    const result = await exec(process.execPath, [infrManageRunner, ...args], { cwd: directory });
+    assert.deepEqual(JSON.parse(result.stdout), {
+      argv: args,
+      entry: join(root, "agent/zcode-infr-manage.cjs"),
+      cwd: directory,
+    });
+  }
 });
 
 test("help exposes Web mode and preserves CLI help; version uses the distribution", async (t) => {
@@ -176,6 +205,11 @@ test("installer creates zcode and the installed command defaults to CLI", async 
   assert.deepEqual(JSON.parse(result.stdout).argv, []);
   const webHelp = await exec(join(bin, "zcode"), ["--web", "--help"]);
   assert.match(webHelp.stdout, /zcode --web/);
+  // 第二个 shim 必须在同一个安装目录里就位，否则发行包里拿不到这个命令。
+  const infrManage = await exec(join(bin, "zcode-infr-manage"), ["doctor", "--json"], {
+    cwd: directory,
+  });
+  assert.deepEqual(JSON.parse(infrManage.stdout).argv, ["doctor", "--json"]);
 });
 
 test("node-pty prebuild patch keeps the official native that matches the official JS", async (t) => {
