@@ -75,3 +75,7 @@ packages/desktop/resources/macos-window-bounds/
 __pycache__/
 *.pyc
 .zcode-runtime
+# SQLite 迁移前的备份产物（session-store migration-runner 写到 db 旁的 backup/）。
+# 跑 adapters 测试时若用例用了相对 db 路径，备份会落到当时工作目录（packages/adapters/backup/），
+# 属测试产物，不该进仓库。
+**/backup/cli-*/
