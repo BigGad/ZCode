@@ -48,7 +48,7 @@ ZCode 里「模型」这个词**已经被 LLM 占用**，且不止一处。`capa
 
 因此：
 
-- 命令名是 **`zcode asset`**，**不是** `zcode model`。
+- 命令名是 **`zcode-infr-manage asset`**（独立二进制 `zcode-infr-manage` 的资产子命令组），**不是** `zcode model`。
 - 类型名统一 `LocalAsset*` / `AssetId` / `AssetKind`，不出现 `Model*`。
 - 目录与文件名用 `assets`，不用 `models`。
 - ⚠️ 但**资产里装的可以是模型**（PP-OCR 权重就是模型）—— 「资产」是**角色**（ZCode 托管的、只读的、可切换版本的文件），不是**内容**。不要因为内容是模型就把命令叫 model。
@@ -214,7 +214,7 @@ export interface LocalAssetGroupState {
  * 资产层错误码。
  *
  * ⚠️ **本集合不等于 `CapabilityErrorCode`**（`capability-registry.md` §3）。
- * 它**只存在于 `zcode asset` 命令面**；对外的能力信封只允许用能力码，
+ * 它**只存在于 `zcode-infr-manage asset` 命令面**；对外的能力信封只允许用能力码，
  * 资产码由**消费方能力层单向归一**（见 `capability-registry.md` §7 的映射表）。
  */
 export type LocalAssetErrorCode =
@@ -240,26 +240,26 @@ export type LocalAssetErrorCode =
 **这是给人 / 运维用的命令，不是 agent 工具** —— 因此它**不进** `CapabilityRegistry`，也**不做** MCP / 内置工具投影（对照 `capability-registry.md` §4 的三投影模型）。资产管理的使用者是人，要的是可发现性和可读输出，不是 JSON 信封。
 
 ```
-zcode asset list                     # 已安装资产 + 激活标记
-zcode asset catalog                  # 可获取的组 / 资产、版本、体积、许可
-zcode asset install <group|asset>    # 下载 + 校验 + 解压（不激活）
-zcode asset use <group>[@version]    # 切换激活版本
-zcode asset remove <asset>[@version]
-zcode asset verify <asset>[@version]
-zcode asset path <group|asset>       # 打印本地绝对路径（给外部工具用）
-zcode asset install --offline <dir>  # 从本地目录离线安装
+zcode-infr-manage asset list                     # 已安装资产 + 激活标记
+zcode-infr-manage asset catalog                  # 可获取的组 / 资产、版本、体积、许可
+zcode-infr-manage asset install <group|asset>    # 下载 + 校验 + 解压（不激活）
+zcode-infr-manage asset use <group>[@version]    # 切换激活版本
+zcode-infr-manage asset remove <asset>[@version]
+zcode-infr-manage asset verify <asset>[@version]
+zcode-infr-manage asset path <group|asset>       # 打印本地绝对路径（给外部工具用）
+zcode-infr-manage asset install --offline <dir>  # 从本地目录离线安装
 ```
 
-⚠️ **`--offline` 是带值旗标（string），不是布尔**：`options: { offline: { type: "string" } }`。值 = 本地目录。**不要**写成 `zcode asset install --offline <dir>` 里的 `<dir>` 是位置参数 —— 那会让 `install` 的位置参数槽同时承载「组/资产 id」和「目录」两种含义，必须靠旗标有无来猜。
+⚠️ **`--offline` 是带值旗标（string），不是布尔**：`options: { offline: { type: "string" } }`。值 = 本地目录。**不要**写成 `zcode-infr-manage asset install --offline <dir>` 里的 `<dir>` 是位置参数 —— 那会让 `install` 的位置参数槽同时承载「组/资产 id」和「目录」两种含义，必须靠旗标有无来猜。
 
 ⇒ **`install` 的位置参数与 `--offline` 互斥**，规则写死：
 
 | 输入 | 行为 |
 | --- | --- |
-| `zcode asset install tessdata-zh-en` | 在线安装组 `tessdata-zh-en` |
-| `zcode asset install --offline /tmp/pkgs` | 从本地目录离线安装（目录里的内容由 §6 的清单文件描述） |
-| `zcode asset install tessdata-zh-en --offline /tmp/pkgs` | ⚠️ **报错退出**（`1`）—— 两个来源同时给，不猜 |
-| `zcode asset install`（既无位置参数也无 `--offline`） | ⚠️ **报错退出**（`1`）+ 用法提示 |
+| `zcode-infr-manage asset install tessdata-zh-en` | 在线安装组 `tessdata-zh-en` |
+| `zcode-infr-manage asset install --offline /tmp/pkgs` | 从本地目录离线安装（目录里的内容由 §6 的清单文件描述） |
+| `zcode-infr-manage asset install tessdata-zh-en --offline /tmp/pkgs` | ⚠️ **报错退出**（`1`）—— 两个来源同时给，不猜 |
+| `zcode-infr-manage asset install`（既无位置参数也无 `--offline`） | ⚠️ **报错退出**（`1`）+ 用法提示 |
 
 ⚠️ 报错必须走**既有的错误出口**（`ctx.stderr.write` + 返回 exit code，**不调 `process.exit`**），照 `memo-command.ts` 的范式。
 
@@ -267,23 +267,28 @@ zcode asset install --offline <dir>  # 从本地目录离线安装
 
 | 参数形态 | 例子 | 对应端口方法 | 返回 |
 | --- | --- | --- | --- |
-| **组 id**（连字符，形如 `tessdata-zh-en`） | `zcode asset path tessdata-zh-en` | `resolveGroup()` | **汇合目录**（tesseract 的 `--tessdata-dir` 指向它） |
-| **资产 id**（点分，形如 `tessdata.chi_sim`） | `zcode asset path tessdata.chi_sim` | `resolve()` | 单个资产目录 |
+| **组 id**（连字符，形如 `tessdata-zh-en`） | `zcode-infr-manage asset path tessdata-zh-en` | `resolveGroup()` | **汇合目录**（tesseract 的 `--tessdata-dir` 指向它） |
+| **资产 id**（点分，形如 `tessdata.chi_sim`） | `zcode-infr-manage asset path tessdata.chi_sim` | `resolve()` | 单个资产目录 |
 
 ⚠️ 组 id **不允许点号**，资产 id **不允许连字符** —— 两者靠这个区分，不会歧义。
 
 **接入点（既有四件套，缺一不可）**：
 
-1. `apps/zcode-cli/packages/cli/src/asset-command.ts` —— 命令实现（依赖注入 + 返回 exit code，**不调 `process.exit`**），照 `memo-command.ts` 的范式。
-2. `apps/zcode-cli/packages/cli/src/arguments.ts` —— 全局 `parseArgs({strict:true})` 里注册 `--offline`（**string 类型**，值 = 本地目录，见上表）及后续需要的旗标。既有注释口径：strict 解析器要求旗标在全局注册，`run.ts` 收集后透传，**不污染其他命令的选项语义**。⚠️ **已核对：当前 50 个全局旗标里没有 `offline`** → 需新增。
-3. `apps/zcode-cli/packages/cli/src/run.ts` —— 加 `case "asset"` 分派。
-4. help 文案（`zcode --help` 与 `zcode asset --help`）。
+1. `apps/zcode-cli/packages/cli/src/infr-manage/asset-command.ts` —— 命令实现（依赖注入 + 返回 exit code，**不调 `process.exit`**），照 `memo-command.ts` 的范式。
+2. `apps/zcode-cli/packages/cli/src/infr-manage/` —— **`zcode-infr-manage` 自己的参数解析入口**，声明 `--offline`（**string 类型**，值 = 本地目录，见上表）等旗标。
+   ⚠️ **不注册进 `zcode` 的全局 `parseArgs`**（`packages/cli/src/arguments.ts`）—— 那是 `zcode` 这个 bin 的旗标表，把 `--offline` 塞进去会**污染 `zcode` 的选项语义**。
+   ⚠️ **也不能复用 `parseGlobalArgs`**：它是 `strict: true`，且 **`-p` 已被 `--prompt` 占用**。
+3. ❌ **不**在 `packages/cli/src/run.ts` 加 `case "asset"` 分派 —— 资产命令面属于**独立 bin**，不进 `zcode` 的分派表（否则会造出 `zcode asset` 子命令，与"独立命令面"的前提相反）。
+4. help 文案（`zcode-infr-manage --help` 与 `zcode-infr-manage asset --help`）。
 
 ⚠️ **不叫 `zcode model`**（§2）。
 
-⚠️ **不做成独立二进制 —— ⚠️ 这一条与用户原话有出入，待用户确认**。用户原话是「我就单独开一个 cli，专门用来切换模型」；本 spec 落成 `zcode asset` **子命令组**（不是独立二进制）。理由：仓库里已有两个包声明 bin 名 `zcode`（`@zcode/cli` 与 `@zcode/server-cli`），再开第三个会加剧冲突；独立 CLI 还要重造参数解析 / 退出码 / i18n / 日志 / 遥测。
+✅ **已定：走独立命令面 `zcode-infr-manage`**（用户 2026-11-08 确认）。见 [`local-infra.md`](./local-infra.md) §7.3 / §2.2 M5。
 
-**这条取舍没有获得用户确认** —— 实施前必须回到用户确认「子命令组 vs 独立二进制」。**唯一例外**是离线安装器需要独立分发 —— 若将来要做，名字不能叫 `zcode`（如 `zcode-asset-installer`）。
+- **为什么不是 `zcode asset` 子命令组**：本地资产属于「本地基础设施」的一半（另一半是动态引擎与服务），由同一个二进制承载，边界更清楚 —— 见 [`local-infra.md`](./local-infra.md) §7.3。
+- **为什么不是第三个 `zcode` bin 名**：仓库里 bin 名 `zcode` 已被 `@zcode/cli` 与 `@zcode/server-cli` 各占一次；`zcode-infr-manage` 是**新名字，无冲突**。
+- **分发形态**：⚠️ **不是**"`@zcode/cli` 的第二个 bin"—— 该包是 `private: true`，它的 `bin` 字段**不会被物化成用户可执行文件**。真实的发行链是 `scripts/build-zcode.mjs` → `scripts/zcode-distribution/{runner,installer}.mjs` → installer 写 shim，**只认一个入口** ⇒ 要真交付 `zcode-infr-manage` 这个命令，得同时改 **4 处**（build.mjs 加第二个 esbuild 入口 / build-zcode.mjs 拷第二个 bundle / runner 按 argv[0] 路由 / installer 写第二个 shim），并同步 `zcode-distribution{,-smoke}.test.mjs`。⚠️ **SEA 单文件与 Electron 桌面 v1 不提供**这个命令。完整清单见 [`local-infra.md`](./local-infra.md) §7.3。
+- **实现落点**：资产命令实现放在 `apps/zcode-cli/packages/cli/src/infr-manage/asset-command.ts`，由 `zcode-infr-manage` 这个入口复用；资产解析逻辑走 `packages/adapters` 的本地资产实现（见 [`local-infra.md`](./local-infra.md) §7.2）。
 
 ## 6. 存储布局
 
@@ -337,9 +342,9 @@ zcode asset install --offline <dir>  # 从本地目录离线安装
 
 **决策（用户已定）**：切换在**调用前生效**。
 
-- `zcode asset use <group>@<version>` = **原子替换 `active.json` 里的指针**，不移动文件、不删除旧版本。
+- `zcode-infr-manage asset use <group>@<version>` = **原子替换 `active.json` 里的指针**，不移动文件、不删除旧版本。
 - **端口不缓存指针**（§4）→ 运行中的 agent 进程在**下一次** OCR 调用时就会用新版本，无需重启会话。
-- 旧的已安装版本留在 `objects/` 里 → 出问题可以 `zcode asset use <group>@<old>` 立刻回退。
+- 旧的已安装版本留在 `objects/` 里 → 出问题可以 `zcode-infr-manage asset use <group>@<old>` 立刻回退。
 - 切一个组 = 该组所有成员一起切，**要么全成要么全不成**（先校验全部成员已安装且版本满足 `requires`，再原子写指针）。
 
 ⚠️ 这条对 OCR adapter 有直接影响：**tessdata 路径不能在装配期（`port-wiring.ts`）解析一次就固定住**，必须在**每次识别前**通过 `LocalAssetPort.resolveGroup("tessdata-zh-en")` 解析。这与「端口实例在装配时创建」的常规做法不同，spec 里必须写死，否则会拿到启动时的旧版本。
@@ -425,7 +430,7 @@ zcode asset install --offline <dir>  # 从本地目录离线安装
 内网 / 涉密环境无法联网。**离线安装不是可选项** —— OCR 在这些场景里是主链路。
 
 ```
-zcode asset install --offline <dir>
+zcode-infr-manage asset install --offline <dir>
 ```
 
 `<dir>` 里放：
@@ -448,7 +453,7 @@ zcode asset install --offline <dir>
 
 - OCR adapter 在**每次识别前**调用 `LocalAssetPort.resolveGroup("tessdata-zh-en")` 拿到 tessdata 目录（成员已汇合，含 `configs/`）→ 命令拼装加 **`--tessdata-dir <dir>`**。
 - ⚠️ **必须显式带 `--tessdata-dir`**，不能依赖系统 tessdata —— 否则用户机器上装的语言包版本会污染结果，且行为不可复现。
-- 未安装 → OCR 返回 `unavailable` + 提示 `zcode asset install tessdata-zh-en`。
+- 未安装 → OCR 返回 `unavailable` + 提示 `zcode-infr-manage asset install tessdata-zh-en`。
 - sidecar 的 `engine` 块要记资产版本（§10.1），换语言包版本后 sidecar 不可复用。
 
 ### 10.1 sidecar 的资产字段
@@ -478,7 +483,7 @@ zcode asset install --offline <dir>
 | 激活指针（`active.json`） | `apps/zcode-cli/packages/adapters/src/local-assets/active.ts` | 原子写（§6 四层表）；**每次 resolve 重读，不缓存** |
 | 资产源的配置解析与优先级 | `apps/zcode-cli/packages/adapters/src/config`（既有 `config.json` schema） | ⚠️ **要改两处 schema**：`ZCodeConfigFileSchema` 加 `assets` 段，**且** `projectConfigFileSchema` 的 `.pick({...})` 白名单必须加 `assets: true` —— 否则项目级 `assets` 被 `.strip()` 静默剥离，§8 的「项目级 > 用户级」永远不生效（且键名拼错也不报错）。见 §8 |
 | catalog 的拉取与校验 | `apps/zcode-cli/packages/adapters/src/local-assets/catalog.ts` | zod schema + sha256 格式；拉取走 `HttpClientPort` |
-| **CLI 命令与退出码** | `apps/zcode-cli/packages/cli/src/asset-command.ts` | 返回 exit code 给 `run.ts`，**不调 `process.exit`** |
+| **CLI 命令与退出码** | `apps/zcode-cli/packages/cli/src/infr-manage/asset-command.ts` | 返回 exit code 给 **`zcode-infr-manage` 这个入口**（⚠️ 不是 `run.ts` —— 资产面**不进 `zcode` 的分派表**），**不调 `process.exit`** |
 | **「装哪些资产 / 什么时候需要装」** | **消费方能力层**（OCR 能力） | 资产层只提供能力，不做判断 |
 | **切换资产版本的时机与意图** | **用户**（经 CLI） | 资产层不主动切换 |
 
@@ -494,7 +499,7 @@ zcode asset install --offline <dir>
 
 | 情形 | 错误码（`LocalAssetErrorCode`） | 退出码 | 说明 |
 | --- | --- | --- | --- |
-| 资产不存在 / 未安装 | `not_found` | `1` | 提示 `zcode asset install <group>` |
+| 资产不存在 / 未安装 | `not_found` | `1` | 提示 `zcode-infr-manage asset install <group>` |
 | 下载失败（网络 / 404） | `unavailable` | `1` | 附状态码；不泄露内部源地址到用户可见输出之外 |
 | **sha256 校验不通过** | `corrupted` | `1` | **必须失败**，不降级用旧版本（§8） |
 | 解压失败 / 路径穿越 | `corrupted` | `1` | 安全解压拦截（§6） |
@@ -505,11 +510,11 @@ zcode asset install --offline <dir>
 | 用户取消 | `cancelled` | `130` | |
 | 超时 | `timeout` | `124` | |
 
-⚠️ **这一组错误码 = `LocalAssetErrorCode`（§4 已定义），只存在于 `zcode asset` 命令面**，不进对外的能力信封。
+⚠️ **这一组错误码 = `LocalAssetErrorCode`（§4 已定义），只存在于 `zcode-infr-manage asset` 命令面**，不进对外的能力信封。
 
 ⚠️ **`ocr-local.md` §8 用的是另一套码**：那张表有**三列**——引擎层码（`OcrEngineErrorCode`）、对外能力码（`CapabilityErrorCode`）、CLI 退出码。**对外只允许用中间那列**；引擎层码一律归一，原始码放 `details.engineCode`。归一映射在 `ocr-local.md` §8 的表里逐行给出，总表见 [`capability-registry.md`](./capability-registry.md) §7。
 
-⚠️ **本 spec 的 `LocalAssetErrorCode` 与上面两套都不同**：它只存在于 `zcode asset` 命令面（§12），**不进能力信封**。资产层报错 → OCR 能力层捕获 → 归一成 `unavailable` / `not_found` 等能力码 → 原始资产码放 `details.assetCode`。**归一方向是单向的：底层 → 能力码。**
+⚠️ **本 spec 的 `LocalAssetErrorCode` 与上面两套都不同**：它只存在于 `zcode-infr-manage asset` 命令面（§12），**不进能力信封**。资产层报错 → OCR 能力层捕获 → 归一成 `unavailable` / `not_found` 等能力码 → 原始资产码放 `details.assetCode`。**归一方向是单向的：底层 → 能力码。**
 
 ⚠️ **归一方向是单向的：底层 → 能力码**。不是「CLI 层把能力码映射成资产码」。资产码 → 能力码的归一由**消费方能力层**完成（OCR 能力层把「资产未安装 / 未激活」归一成 `unavailable`，原始码放 `details.assetCode`）。
 
@@ -546,26 +551,26 @@ zcode asset install --offline <dir>
 | **归档 URL 推导** | 无 `archivePath` 时按 `<assetId>-<version>.<ext>` 推导；有 `archivePath` 时优先用它（§8） |
 | 离线安装 | 校验通过 → 落盘并可 `resolveGroup`；校验不过 → 抛 `corrupted` |
 | CLI 表面 | `list` / `catalog` / `install` / `use` / `remove` / `verify` / `path` 七条命令的 stdout 与退出码 |
-| **CLI `path` 的组/资产分流** | `zcode asset path tessdata-zh-en` → 汇合目录（含 `configs/`）；`zcode asset path tessdata.chi_sim` → 单资产目录（§5） |
+| **CLI `path` 的组/资产分流** | `zcode-infr-manage asset path tessdata-zh-en` → 汇合目录（含 `configs/`）；`zcode-infr-manage asset path tessdata.chi_sim` → 单资产目录（§5） |
 | CLI 退出码 | 逐条对上 §12 的表 |
 | 错误输出 | 失败时 stderr 一行，不打印堆栈 |
 
 **端到端手测**（需要本机装好 tesseract，**不是 CI 门禁**）：
 
-1. `zcode asset install tessdata-zh-en` → 落盘 46MB。
-2. `zcode asset path tessdata-zh-en` → 打印目录。
+1. `zcode-infr-manage asset install tessdata-zh-en` → 落盘 46MB。
+2. `zcode-infr-manage asset path tessdata-zh-en` → 打印目录。
 3. `zcode cap run ocr --input ocr-request.json --json`（`ocr-request.json` = `{ "path": "扫描件.pdf" }`）→ 命令行带 `--tessdata-dir`（用 `ps` / 日志确认），识别结果与系统 tessdata **字节一致**。
 4. 删掉 `configs/` 那一项再跑 → **必须报错而不是静默返回空**（回归 §3 的静默失败坑）。
 
 ## 14. 未决问题
 
 1. **PP-OCR 走不走 ONNX？** 若走，资产层要新增 `kind=runtime` 的条目（ONNX Runtime 原生二进制；实测 `onnxruntime-node` 当前版本 **31~47MB/平台** + ~0.5MB binding，**Windows x64 / arm64 均已提供**），且 OCR 引擎要换、sidecar 的 bbox 从四点八数变四点四数 → 触发对外契约版本递增。**前置条件是先有真实扫描件的对比数据** —— 现有 CER 全部来自合成清晰页，测不出真实件的差距。
-2. **资产的清理策略？** 内容寻址目录会累积旧版本。要不要 LRU 自动清理？→ 倾向**不自动删**（用户可能要回退），提供 `zcode asset remove` 与 `zcode asset list` 显示体积，让用户自己决定；但要加一个「总占用」显示。
+2. **资产的清理策略？** 内容寻址目录会累积旧版本。要不要 LRU 自动清理？→ 倾向**不自动删**（用户可能要回退），提供 `zcode-infr-manage asset remove` 与 `zcode-infr-manage asset list` 显示体积，让用户自己决定；但要加一个「总占用」显示。
 3. **资产组的版本策略？** 组版本（如 `tessdata-zh-en` 的 `1.0.0`）与成员版本（`chi_sim` 的 `4.0.0`）是两套语义。组版本是「这套组合的发布号」，成员版本是「单个资产的上游版本」。→ 目录结构已按此设计（组清单存 members），但**升级时组版本如何递增**未定（成员变了组版本要不要跟着变？→ 倾向要，否则缓存无法区分组合）。
 4. **多语言怎么办？** 现在只有 `chi_sim` + `eng`。要不要支持按需装其它语言（日文、韩文）？→ 倾向支持，catalog 里加条目即可，组变成 `tessdata-ja` / `tessdata-ko`（**保持 `tessdata-` 前缀**，见 §4 的组 id 格式约定）；但 v1 不做。
-5. **资产的许可标注**：catalog 里每条都有 `license`。要不要在 `zcode asset catalog` 里显式展示并要求确认（GPL 类模型要提示）？→ 倾向展示；`tessdata` 是 Apache-2.0，无强制确认。
+5. **资产的许可标注**：catalog 里每条都有 `license`。要不要在 `zcode-infr-manage asset catalog` 里显式展示并要求确认（GPL 类模型要提示）？→ 倾向展示；`tessdata` 是 Apache-2.0，无强制确认。
 6. **离线安装器要不要独立成二进制？** 见 §5 的例外条款。
-7. ⚠️ **`zcode asset` 是子命令组还是独立二进制？** 见 §5 的标注 —— **用户原话是「单独开一个 cli」，本 spec 落成了子命令组，这个取舍尚未获用户确认**。实施前必须回去确认。
+7. ✅ **已结（2026-11-08，用户确认）**：走**独立命令面 `zcode-infr-manage`** —— 资产是其 `asset` 子命令组，与引擎面（`doctor` / `parse`）同属一个二进制。理由与分发形态见 §5 的标注与 [`local-infra.md`](./local-infra.md) §7.3。
 8. **`kind=runtime` 资产的 macOS 隔离问题**（二期相关）：下载的二进制会带 `com.apple.quarantine` 属性 → macOS Gatekeeper 可能拒绝执行。v1 只有 `kind=data`（纯数据文件，不受影响）；做 runtime 资产时需要显式 `xattr -d com.apple.quarantine` 或改用不带隔离属性的分发方式。
 
 ## 15. 安装与切换的 owner / 事件顺序图
@@ -573,9 +578,9 @@ zcode asset install --offline <dir>
 AGENTS.md 要求「涉及状态、时序、远端或异步同步的方案，用图展示所有者及事件顺序」。本模块的跨进程状态（激活指针）必须画清楚：
 
 ```
-   用户                        进程 A（运行中的 agent）              进程 B（zcode asset use）
+   用户                        进程 A（运行中的 agent）              进程 B（zcode-infr-manage asset use）
      │                                │                                      │
-     │ ① zcode asset install <group>  │                                      │
+     │ ① zcode-infr-manage asset install <group>  │                                      │
      ▼                                │                                      │
  ┌──────────┐                         │                                      │
  │ CLI 命令 │ ② 下载 → 校验 sha256 → 解压到临时目录 → rename → 汇合 → rename │
@@ -583,7 +588,7 @@ AGENTS.md 要求「涉及状态、时序、远端或异步同步的方案，用�
  │  command)│ ③ 落盘完成（**不激活**）                                     │
  └──────────┘                         │                                      │
       │                                │                                      │
-      │ ④ zcode asset use <group>@v    │                                      │
+      │ ④ zcode-infr-manage asset use <group>@v    │                                      │
       ▼                                │                                      │
  ┌──────────┐                         │                                      │
  │ CLI 命令 │ ⑤ 校验组成员齐全 + requires 满足                              │

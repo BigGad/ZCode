@@ -15,7 +15,7 @@
 | 能力 | spec | 状态 |
 | --- | --- | --- |
 | 本地 OCR | [`ocr-local.md`](./ocr-local.md) | 本轮写 spec（含图像预处理：倾斜校正 / 去噪 / 去阴影 / 去色彩 / 二值化；默认只做倾斜校正，其余四步保留在契约里但不启用） |
-| 本地资产（模型 / 语言包）管理 | [`model-assets.md`](./model-assets.md) | 本轮写 spec（ZCode 托管语言包；`zcode asset` 命令组；**不是能力**，见下） |
+| 本地资产（模型 / 语言包）管理 | [`model-assets.md`](./model-assets.md) | 本轮写 spec（ZCode 托管语言包；`zcode-infr-manage asset` 命令组；**不是能力**，见下） |
 | 客户端本地知识库（Runtime 内置 RAG） | [`knowledge-rag.md`](./knowledge-rag.md) | 本轮写 spec |
 | 统一规范规则引擎 | [`standard-rule-engine.md`](./standard-rule-engine.md) | 本轮写 spec |
 | 文档解析 | 已有 `office-runtime`（`packages/office-runtime`） | 无需新 spec |
@@ -26,7 +26,9 @@
 
 ⚠️ **知识检索不是能力键，是 runtime 子系统**。按用户定的方向（客户端本地优先、服务端只是补充），本地知识库住在 ZCode runtime 里、由 runtime 每轮自动消费（`relevant_knowledge` 注入 + `KnowledgeSearch` 工具），它**不进**本注册表、**不投影**成 `zcode cap run knowledge.search`。它的离线动作（建索引 / 查索引）以 `zcode knowledge index|search` 子命令单独暴露——理由见 [`knowledge-rag.md`](./knowledge-rag.md) §17。
 
-⚠️ **本地资产管理同样不是能力**。语言包 / 模型权重的下载、校验、切换（[`model-assets.md`](./model-assets.md)）**不进**本注册表、**不做**三投影 —— 它的使用者是人和运维，不是 agent，所以只有 `zcode asset ...` 一条 CLI 表面。这与知识检索「不投影成能力」是同一类判断，但理由不同：知识检索是 runtime 子系统，资产管理是**基础设施**。
+⚠️ **本地资产管理同样不是能力**。语言包 / 模型权重的下载、校验、切换（[`model-assets.md`](./model-assets.md)）**不进**本注册表、**不做**三投影 —— 它的使用者是人和运维，不是 agent，所以只有 `zcode-infr-manage asset ...` 一条 CLI 表面。这与知识检索「不投影成能力」是同一类判断，但理由不同：知识检索是 runtime 子系统，资产管理是**基础设施**。
+
+⚠️ **本地资产命令面已并入 `zcode-infr-manage`**（见 [`local-infra.md`](./local-infra.md) §7.3）—— 「基础设施」的两面（静态资产 + 动态引擎）由同一个二进制承载。资产层的规格仍在 [`model-assets.md`](./model-assets.md)，只是前缀变了。
 
 **不适用**
 
@@ -114,6 +116,12 @@ export interface CapabilityPorts {
   readonly imagePreprocess: ImagePreprocessPort;
   /** 本地资产（`local-asset.port.ts`）。 */
   readonly localAsset: LocalAssetPort;
+  /**
+   * 本地基础设施（`local-infra.port.ts`）—— 解析档位链 / 产物 / 降级。
+   * ⚠️ **档位选择与降级决定归这个端口**（见 [`local-infra.md`](./local-infra.md) §5.1），
+   * 能力层不自己探环境、不自己选引擎。
+   */
+  readonly localInfra: LocalInfraPort;
   /** 子进程执行（既有 `execution.port.ts`）。 */
   readonly execution: ExecutionPort;
   /** 文件系统（既有 `file-system.port.ts`）—— 原子写、临时文件、目录遍历都走它。 */
@@ -317,7 +325,7 @@ ToolEntry
 | `runtimeInputSchema` / `runtimeOutputSchema` | **同一个 zod schema** | ⚠️ 必须同时提供，否则内置 tool 缺运行时校验（既有断言 `tool-contract-assertions.ts:15-16` 要求每个注册 tool 都非空） |
 | `permission` | 既有权限层 | `ToolPermissionSpec` —— 复用，不自造。⚠️ 其中的 `riskLevel` / `sideEffectScope` / `needsApproval` 要与 `metadata` 里的**保持一致** |
 | `resultBudget` | **按能力定** | ⚠️ OCR 逐页文本可达 MB 级 → **必须落 artifact，只回摘要 + 预览 + 引用**，不回灌模型上下文 |
-| `timeout` / `cancellation` | 能力实现 | OCR 单页 120s / 整批 30min（见 `ocr-local.md` §8） |
+| `timeout` / `cancellation` | 能力实现 | ⚠️ **tesseract 路线**：单页 120s / 整批 30min（见 `ocr-local.md` §8）。⚠️ **MinerU 路线不适用这套预算** —— 一份 300 页 PDF 会远超 30min，照抄会**静默杀掉合法任务**；MinerU 的预算按「冷启动基线 + 页数 × 单位额度」算（[`local-infra.md`](./local-infra.md) §7.8） |
 | `trace` | `context.traceId` | 全链路可传播 |
 | `handler` / `formatModelContent` | 投影层 | 调 `execute` 并把结果投影成模型可读内容 |
 
@@ -447,6 +455,7 @@ AGENTS.md 要求「涉及状态、时序、远端或异步同步的方案，用�
 | MCP 投影的连接与工具注册 | `packages/bootstrap/src/app/`（路线 a）或插件包 + `OFFICIAL_PLUGIN_DEFINITIONS`（路线 b） | 见 §4.3，**待定**；不在业务包内拉起 server |
 | 内置工具投影的权限判定 | `apps/zcode-cli/packages/core/src/tool/handlers/` | 复用既有权限层，不自造 |
 | **OCR sidecar 的写入** | `apps/zcode-cli/packages/adapters/src/ocr/`（sidecar store） | 原子写；**能力层只发指令，不直接 fs**（见下） |
+| **MinerU 的引擎定位 / 档位选择 / 降级 / 产物落盘** | `apps/zcode-cli/packages/adapters/src/local-infra/` | ⚠️ 同上：**adapter 写，能力层只发指令**（[`local-infra.md`](./local-infra.md) §6.1） |
 | **OCR sidecar 的读取 + 缓存失效** | `apps/zcode-cli/packages/office-runtime/src/adapters/files.ts` | 只读；`fingerprint` 含 sidecar 大小与 mtime |
 | OCR 文本层 sidecar **的格式与落点** | `ocr-local.md` 定义的 `<源文件名>.zcode-ocr.json` | ⚠️ `<源文件名>` **含扩展名**（`扫描件.pdf.zcode-ocr.json`） |
 | 本地知识库（分块 / 全文索引） | `knowledge-rag.md` 定义的独立 SQLite | 每 workspace 一个文件；属 runtime 子系统，不经本注册表 |
@@ -527,7 +536,10 @@ CLI 投影把 `error` 写 stderr 一行（`--json` 时同时进 stdout 的 JSON 
 | 底层码（引擎层 / 资产层） | → 对外 `error.code` | 细粒度信息放哪 |
 | --- | --- | --- |
 | `engine_unavailable` | `unavailable` | `details.engineCode` + `hint`（安装命令） |
-| `language_missing` | `unavailable` | `details.missingLanguages` + `hint`（`zcode asset install tessdata-zh-en`） |
+| `engine_not_found` | `invalid_input` | `details.engineCode`（指定的引擎 / **档位不在官方枚举内**） |
+| `input_invalid` | `not_found`（文件不存在） / `unsupported_input`（类型不支持） | `details.engineCode` —— ⚠️ **二选一的规则必须写死**，否则实现者各写各的 |
+| `artifact_missing` | `internal` | `details.engineCode` —— ⚠️ **退出码 0 但产物缺失 ≠ 成功** |
+| `language_missing` | `unavailable` | `details.missingLanguages` + `hint`（`zcode-infr-manage asset install tessdata-zh-en`） |
 | 资产 `not_found` / 资产未安装 / 未激活 | `unavailable` | `details.assetCode` + `details.group` |
 | `password_protected` | `invalid_input` | `hint`（加密 PDF 的说明） |
 | `corrupted` | `invalid_input` | `details.engineCode` / `details.assetCode` |
@@ -535,7 +547,7 @@ CLI 投影把 `error` 写 stderr 一行（`--json` 时同时进 stdout 的 JSON 
 | `unsupported_input` | `unsupported_input` | — |
 | `timeout` / `cancelled` | 同名 | — |
 
-⚠️ **归一方向是单向的：底层 → 能力码**。不是「CLI 层把能力码映射成资产码」。资产层自己的 `LocalAssetErrorCode`（见 [`model-assets.md`](./model-assets.md) §12）**只存在于 `zcode asset` 命令面**，不进能力信封。
+⚠️ **归一方向是单向的：底层 → 能力码**。不是「CLI 层把能力码映射成资产码」。资产层自己的 `LocalAssetErrorCode`（见 [`model-assets.md`](./model-assets.md) §12）**只存在于 `zcode-infr-manage asset` 命令面**，不进能力信封。
 
 ⚠️ **明确的例外**：`zcode standards validate` 的退出码是 `0 / 1 / 2`（`2` = 文件读不到 / 非法 JSON），**不与本表同源**。该命令面**不注册**为能力键（见 §10 与 §11）—— 这是一个有意的例外，不是遗漏。
 

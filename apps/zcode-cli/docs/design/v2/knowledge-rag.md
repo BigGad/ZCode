@@ -116,6 +116,9 @@ D2 与 D3 是本 spec 的骨架：**本地检索是主线，服务端是加料**
 | 纯文本（`.md` / `.txt` / `.markdown` / `.json` / `.yaml` / `.yml` / `.csv` / `.log` + 常见代码文件） | 直接读文本 | 40 行 | `line:N-M` |
 | PDF（**有文本层**） | poppler `pdftotext -layout` | 一页 | `page:N` |
 | PDF（**扫描件**，无文本层） | 读 OCR sidecar | 一页 | `page:N` |
+
+⚠️ **OCR sidecar 有两个变体，索引器要按 `engine.variant` 分流**（[`ocr-local.md`](./ocr-local.md) §6.1.1）：`"tesseract"`（v1，`pages[].text` = 逐词拼接的纯文本）与 `"mineru"`（v2，`pages[].text` = **该页的 markdown 文本**，含版面结构）。**页锚点 `page:N` 与 `source.sha256` 失效判据两者通用**。⇒ 索引器读 v2 时，`page:N` 锚点仍然成立，但切分粒度要按 markdown 的块来定，不能按 v1 的纯文本行来切。
+⚠️ **本期（v1）不接 MinerU 变体** —— 见 [`local-infra.md`](./local-infra.md) D7：v1 = 先通链路，索引接入留二期。
 | DOCX | zip 读 `word/document.xml` → 段落 | 一段 | `p:N-M` |
 
 **PDF 抽取的确切命令**（走 `ExecutionPort`，`mode: "argv"`，不裸 spawn）：
@@ -874,7 +877,7 @@ parseArgs({ args: ["knowledge", "index", "--path", "/tmp"], options: {}, allowPo
 | 命令面 | 错误形态 | 归属 |
 | --- | --- | --- |
 | `zcode cap run` | `CapabilityErrorCode`（8 值闭集） | [`capability-registry.md`](./capability-registry.md) §3 / §7 |
-| `zcode asset` | `LocalAssetErrorCode` | [`model-assets.md`](./model-assets.md) §4 / §12 |
+| `zcode-infr-manage asset` | `LocalAssetErrorCode` | [`model-assets.md`](./model-assets.md) §4 / §12 |
 | `zcode knowledge` | **本表的 `knowledge_*` 码** | 本 spec §12 |
 | `zcode standards validate` | **无结构化错误码**，只有退出码 `0/1/2` | [`standard-rule-engine.md`](./standard-rule-engine.md) §7.1 |
 

@@ -52,6 +52,12 @@ TUI 的 slash command 候选列表见 [`tui-slash-command-suggestions.md`](./tui
 - `zcode logout`: 清理共享 credential store 中的 ZAI 登录态；如果 `oauth:active_provider` 当前是 `zai`，同步清空 active provider。
 - `zcode doctor`: 输出运行时和打包假设检查，是 CLI 健康检查和 smoke-test 的唯一进程级入口。
 
+⚠️ **唯一进程级入口这条不变式有一个例外**：`zcode-infr-manage` 是**独立二进制**（本地基础设施的命令面，见 [`local-infra.md`](./local-infra.md) §7.3），它自带 `doctor` / `parse` / `asset` 三个命令组。其中 `zcode-infr-manage doctor` 检的是**本地解析引擎环境**（引擎可执行文件、硬件与可跑档位、模型是否就绪），与 `zcode doctor` 的**客户端运行时与打包假设**不是同一件事，两者不重叠、不互相替代。`zcode doctor` 仍是 CLI 自身的健康检查与 smoke-test 入口。
+
+- `zcode-infr-manage doctor`: 只读体检本地解析基础设施（引擎可执行文件定位、硬件档位上限与可跑档位、模型是否就绪、缺失项与装法）。不下载权重、不装依赖、不写状态。退出码恒为 0（除非参数非法）—— 体检报告本身就是结果。
+- `zcode-infr-manage parse --path <file> [--tier <tier>] [--output <dir>] [--json]`: 解析一份文档，产出 markdown + 结构化内容块。⚠️ 旗标统一用长名（与 MinerU 自己的 `--output` 一致）；`--json` 时 stdout 是单个 JSON 对象。⚠️ 这个二进制**有自己的参数解析入口**，不复用 `zcode` 的全局旗标表（那里 `-p` 已被 `--prompt` 占用）。
+- `zcode-infr-manage asset ...`: 本地资产（语言包 / 权重）的安装、校验、切换，见 [`model-assets.md`](./model-assets.md)。
+
 `zcode hello` 不再是受支持命令。CLI 不保留无业务语义的 greeting/smoke-test 命令；脚本、文档和测试需要使用 `zcode doctor` 或 `zcode --version` 表达健康检查意图。
 
 ZCode protocol client 通过协议原生能力承载 session/config 操作，因此只广播只读帮助和 prompt 型命令：

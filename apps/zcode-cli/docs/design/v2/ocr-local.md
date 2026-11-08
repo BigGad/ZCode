@@ -8,11 +8,13 @@
 
 **本 spec 定义**：本地 OCR 引擎契约、流水线、**图像预处理**（倾斜校正 / 去噪 / 去阴影 / 去色彩 / 二值化）、文本层 sidecar 格式、与 `office-runtime` 解析层的衔接、错误语义。
 
+⚠️ **引擎层已扩展**：本地引擎不再是"tesseract 一个"，而是由 [`local-infra.md`](./local-infra.md) 定义的**引擎链**（MinerU 档位链 → tesseract）。**本 spec 的 §4/§5/§6.1 主体描述的是 tesseract 路线**；MinerU 路线是**文档级**的（整份文档进、markdown + 块级结构出），契约层的分流见 §3.1~§3.3，sidecar 变体见 §6.1.1。
+
 **语言包（tessdata）由 ZCode 托管**，机制见 [`model-assets.md`](./model-assets.md)。本 spec 只负责「用哪个 tessdata 目录、怎么传给引擎」，不负责下载与安装。
 
 **不适用**
 
-- 不做版面还原（表格结构、栏序、标题层级）—— v1 只出**页级文本 + 词级 bbox + 置信度**。
+- 不做版面还原（表格结构、栏序、标题层级）—— **tesseract 路线**只出**页级文本 + 词级 bbox + 置信度**；MinerU 路线**自带**版面/表格/公式结构（块级），两条路线的产物形态不同（§3.3）。
 - 不做手写体识别专项调优。
 - 不在 `office-runtime` 内部跑 OCR（见 §6 的放置约束）。
 - 不做实时/流式 OCR。
@@ -69,6 +71,15 @@
 export interface OcrCapabilityInput {
   /** 源文件路径（工作区内）。 */
   readonly path: string;
+  /**
+   * 显式指定引擎；不给 = 由 `LocalInfraPort` 按档位链选（**能力层不自己选引擎**，见
+   * [`local-infra.md`](./local-infra.md) §7.10）。
+   * ⚠️ **没有这个字段，输出侧按 `engine` 判别的联合类型就无法被触发** —— 要么 tesseract
+   * 分支是死代码，要么能力层得自己选引擎（与"能力层不选引擎"冲突）。
+   */
+  readonly engine?: "tesseract" | "mineru-flash" | "mineru-basic" | "mineru-standard" | "mineru-advanced";
+  /** 显式指定 MinerU 档位；不给 = 用 MinerU 的 `default_request_tier`。 */
+  readonly tier?: "flash" | "basic" | "standard" | "advanced";
   /** 处理哪些页。 */
   readonly pages?: "all" | "auto" | string;   // "auto" = 只补无文本层的页；"1-5,8" = 指定页
   /** OCR 文本与已有文本层的关系。 */
@@ -97,16 +108,9 @@ export interface OcrCapabilityInput {
   readonly noWords?: boolean;
 }
 
-export interface OcrCapabilityOutput {
-  readonly path: string;
-  readonly pageCount: number;
-  readonly ocrPages: readonly number[];        // 实际做了 OCR 的页号
-  readonly skippedPages: readonly number[];    // 有文本层、跳过
-  readonly sidecarPath?: string;                // 写了 sidecar 才有
-  readonly averageConfidence?: number;          // 0~100
-  readonly lowConfidencePages: readonly number[]; // 整页平均置信度 < 阈值
-}
 ```
+
+⚠️ **`OcrCapabilityOutput` 只有一份声明，在 §3.3**（按引擎分流的联合类型）。本 spec 曾在这里另写一份 interface，形状冲突且同名双声明会让 TypeScript 直接编译报错 —— 已删除，不要在此处再加回来。
 
 `sideEffects = "workspace"`，`mutating = true`（写 sidecar），`idempotent = true`（同输入同 sidecar 内容，重跑覆盖）。
 
@@ -119,7 +123,107 @@ export interface OcrCapabilityOutput {
 
 ⚠️ 图片格式通常不带可靠的 DPI 元数据，tesseract 只能靠估算（实测一张 300 DPI 的图被估成 560）。**统一显式传 `--dpi`** 可以消除这个不确定性；用户可用 `dpi` 覆盖默认的 300。
 
+### 3.1 引擎链与本契约的关系
+
+⚠️ **本节的前提**：`ocr-local.md` 的引擎层已由 [`local-infra.md`](./local-infra.md) 扩展为**引擎链**（MinerU 档位链 → tesseract）。契约层按引擎分流，**不允许造出第三种"两边都不像"的产物格式**。
+
+| 引擎 | 谁负责 | 产物 | 本契约的适用性 |
+| --- | --- | --- | --- |
+| MinerU（`flash` / `basic` / `standard` / `advanced` 四档） | `LocalInfraPort`（见 [`local-infra.md`](./local-infra.md)） | markdown + **块级**结构（bbox + 类型，**无置信度**） | ⚠️ 部分字段不适用，见 §3.2 |
+| tesseract | `OcrEnginePort`（§4） | 页级文本 + **词级** bbox + 置信度 | 全字段适用 |
+
+⇒ **能力层不自己选引擎**：档位选择与降级决定归 `LocalInfraPort`（[`capability-registry.md`](./capability-registry.md) §3 的 `CapabilityPorts.localInfra`）。能力层只消费 `{ tier, degradedFrom, warnings[] }`。
+
+### 3.2 MinerU 路径下的输入字段处置
+
+⚠️ **契约说谎比报错更糟** —— MinerU 不支持的输入参数一律**明确拒绝**，不静默忽略。
+
+| 本契约字段 | MinerU 路径下 |
+| --- | --- |
+| `psm` / `preprocess` / `thresholdingMethod` / `noWords` | ❌ **明确拒绝** —— 它们是 tesseract 专属（M6） |
+| `strategy`（`fill` / `override`） | ❌ **明确拒绝** —— MinerU 不区分"补文本层"与"覆盖" |
+| `pages`（`all` / `auto` / `"1-5,8"`） | ⚠️ MinerU 走**整份文档**语义；子集需求用 MinerU 自己的页范围表达，不复用该字段 |
+| `languages`（`chi_sim` / `eng`） | ⚠️ **映射**到 MinerU 的语言词表（`ch` 等）—— 两套词汇表不同，**不能同名直传**；映射表待定（[`local-infra.md`](./local-infra.md) §9.2 O3） |
+| `dpi` | ⚠️ MinerU 自行决定渲染分辨率，该字段在 MinerU 路径下**不适用** → 明确拒绝 |
+| `password` | ✅ 沿用 §3 的严规矩：只经 argv、不落盘不入日志、MCP / 内置工具投影必须拒绝 |
+
+### 3.3 输出按引擎分流
+
+```ts
+export type OcrCapabilityOutput =
+  | {
+      readonly engine: "tesseract";
+      readonly path: string;
+      readonly pageCount: number;
+      readonly ocrPages: readonly number[];
+      readonly skippedPages: readonly number[];
+      readonly sidecarPath: string;
+      readonly averageConfidence?: number;
+      readonly lowConfidencePages: readonly number[];
+    }
+  | {
+      readonly engine: "mineru-flash" | "mineru-basic" | "mineru-standard" | "mineru-advanced";
+      readonly path: string;
+      readonly pageCount: number;
+      /** MinerU 系的产物路径。⚠️ 字段名与 MinerU 4.x 的实际产物一致：`structured_content.json` / `middle_json.json`（**没有 `content_list`** —— 那是 2.x 的产物名）。 */
+      readonly markdownPath: string;
+      readonly structuredContentPath?: string;
+      readonly middleJsonPath?: string;
+      /** 裁剪图目录（`images/`），⚠️ **必须与 markdown 同级保留** —— markdown 与 `imageSource` 都用相对路径引用它。 */
+      readonly assetsDir?: string;
+      /** sidecar 路径（v2 变体，见 §6.1.1）。 */
+      readonly sidecarPath?: string;
+      /** ⚠️ **归一化 bbox 的分母**（实测 595×842 pt）—— 消费方要画高亮框必须有它。 */
+      readonly pageWidthPt?: number;
+      readonly pageHeightPt?: number;
+      /** 块级结构：bbox + 类型（文本 / 表格 / 图片 / 图表）。⚠️ **无置信度**；⚠️ **`type` 是开放集合且随档位变**。 */
+      readonly blocks?: readonly OcrBlock[];
+      /** ⚠️ **实际使用的档位**（从产物的 `extensions.mineru.tier` 回填，不是回填请求值）。 */
+      readonly tier?: "flash" | "basic" | "standard" | "advanced";
+      /** ⚠️ **降级的对外落点**：发生过降级时的上一档位。⚠️ 只写在人话 `metrics.warnings[]` 里的话，业务客户端机器读不到。 */
+      readonly degradedFrom?: "flash" | "basic" | "standard" | "advanced";
+    };
+
+/**
+ * MinerU 的块。
+ * ⚠️ **bbox 是归一化坐标 0~1 的四点**（x0,y0,x1,y1），**不是像素**（tesseract 侧是像素）—— 换算的分母见 `OcrCapabilityOutput.engine.pageWidthPt/pageHeightPt`。
+ * ⚠️ **无置信度字段**。
+ * ⚠️ **`type` 是开放字符串，不是封闭枚举** —— 实测出现过 `text` / `paragraph_title` / `table` / `image` / `chart`，且**类型名随档位变**（同一张图 standard/flash 叫 `image`、advanced 叫 `chart`）。
+ * ⚠️ **载荷随类型变** —— `text`/`paragraph_title` 只有 `{type,bbox,content}`（+`level`）；`table`/`image`/`chart` 多 `captions`/`footnotes`/`image_source`（+`sub_type`）。⇒ **schema 必须允许额外字段**；且**图片块的 `content` 是空字符串**（图片本体只由 `image_source` 指向）。
+ */
+export interface OcrBlock {
+  /** 块类型（开放集合；未知类型必须原样保留，不得丢弃）。 */
+  readonly type: string;
+  /** 四点归一化 bbox（0~1）。 */
+  readonly bbox: readonly [number, number, number, number];
+  readonly content: string;
+  /** 标题层级（`paragraph_title` 才有）。 */
+  readonly level?: number;
+  /** 图表类才有：指向裁剪图的相对路径（需与 sidecar 同级保留 `images/`）。 */
+  readonly imageSource?: string;
+  readonly captions?: readonly unknown[];
+  readonly footnotes?: readonly unknown[];
+  readonly subType?: string;
+}
+```
+
+⚠️ **两者 bbox 粒度与单位都不同、置信度只有 tesseract 有** —— 消费方按 `engine` 字段分流，**不得假设字段齐全**：
+
+| | tesseract | MinerU |
+| --- | --- | --- |
+| bbox 粒度 | **词级** | **块级** |
+| bbox 单位 | **像素** | **归一化 0~1** |
+| 置信度 | ✅ 每词有 | ❌ **没有** |
+
+⚠️ **降级是任务级的**：一次任务只用一个引擎，产物形态由该引擎决定；**不中途换引擎**，不产生"半份 tesseract + 半份 MinerU"的混合产物（[`local-infra.md`](./local-infra.md) §5.1）。
+
 ## 4. 引擎端口
+
+⚠️ **本节只覆盖 tesseract 一条路线**。MinerU 路线**不走这个端口** —— 它经 `LocalInfraPort`（[`local-infra.md`](./local-infra.md) §7.1），由本地基础设施层负责档位选择、执行、降级与产物收集。
+
+**为什么分开**：`OcrEnginePort` 的契约是「给一张图，出**词级**文本层」；MinerU 的契约是「给一份文档，出**块级**结构」。两者形态不同，硬塞进一个端口会造出一个两边都不像的接口。**唯一共同的边界是能力层**（§3.3 按 `engine` 分流）。
+
+⚠️ **档位选择与降级决定归 `LocalInfraPort`**，不在 `OcrEnginePort`、也不在能力层（[`local-infra.md`](./local-infra.md) §5.1）。
 
 ```ts
 // apps/zcode-cli/packages/contracts/src/interfaces/ocr-engine.port.ts
@@ -251,6 +355,9 @@ export interface ImagePreprocessPort {
 ⚠️ **`ImageProcessorPort` 不是这个**。已有的 `apps/zcode-cli/packages/contracts/src/interfaces/image-processor.port.ts` 是给**视觉模型**准备输入用的（缩放 + 压缩到 base64 预算内），语义是"让模型能吃下"，不是"让 OCR 读得更准"。两者不要合并，也不要复用它的 `resizeToFit` / `prepareForModel`。
 
 ## 5. 流水线
+
+⚠️ **本节是 tesseract 路线**（逐页渲染 → 逐页预处理 → 逐页识别 → 拼页级文本层）。**MinerU 路线完全不同**：它是**文档级**引擎 —— 一次吃整份 PDF，输出 markdown + 块级结构，**没有逐页渲染、没有 ZCode 侧预处理、没有词级 bbox**。两条路线只在能力层汇合（§3.3 按 `engine` 分流），中间不共享任何一步（[`local-infra.md`](./local-infra.md) §5.1）。
+
 
 ```
 输入文件
@@ -407,6 +514,8 @@ office-runtime 解析时读 sidecar（只读）→ 无文本层的页用 OCR 文
 
 ### 6.1 Sidecar 格式
 
+⚠️ **本节描述的是 tesseract 变体**。MinerU 变体见 §6.1.1 —— 两者**不是同一份 schema**。
+
 路径：`<源文件目录>/<源文件名>.zcode-ocr.json`（例：`扫描件.pdf.zcode-ocr.json`）。
 
 ⚠️ **`<源文件名>` 含扩展名** —— 不是去掉扩展名的基名。`扫描件.pdf` → `扫描件.pdf.zcode-ocr.json`（不是 `扫描件.zcode-ocr.json`）。业务方拼路径时别搞错。
@@ -422,6 +531,7 @@ office-runtime 解析时读 sidecar（只读）→ 无文本层的页用 OCR 文
   },
   "engine": {
     "name": "tesseract",
+    "variant": "tesseract",
     "version": "5.5.1",
     "languages": ["chi_sim", "eng"],
     "assets": { "tessdata-zh-en": "1.0.0" },
@@ -458,6 +568,79 @@ office-runtime 解析时读 sidecar（只读）→ 无文本层的页用 OCR 文
 - `engine.assets` 记**语言包资产组 → 版本**（见 [`model-assets.md`](./model-assets.md)）。换语言包版本 → `engine` 块不同 → 旧 sidecar 不复用。这是既有复用判据（`source.sha256` + `engine` 块）的自然延伸，不需要额外机制。
 - `engine.preprocess.skewAngle` 是**实际施加**的校正角（度，正 = 逆时针；即校正前图像的倾斜量）。同一份源文件换引擎参数重跑，sidecar 内容会变 → 消费方要按 `source.sha256` + `engine` 判断能否复用。
 - `pages[].pixelWidth` / `pixelHeight` 是**预处理后**的图像尺寸（做了 deskew 会变）。
+
+### 6.1.1 MinerU 变体
+
+⚠️ **MinerU 的产物形态与 tesseract 不同**（块级 vs 词级、有类型无置信度），**硬塞进 §6.1 的 schema 会造出第三种"两边都不像"的格式**。
+
+⇒ 决策：**sidecar 加 `version: 2`，用 `engine.variant` 区分两种形态**；消费方按 `variant` 分流（分流规则的**权威定义在本表**，不是 `local-infra.md` §7.5 —— 那边只有端口层契约，没有 sidecar 概念）。
+
+MinerU 变体的关键差异：
+
+| 字段 | tesseract 变体（v1） | MinerU 变体（v2） |
+| --- | --- | --- |
+| `engine.name` | `"tesseract"` | `"mineru"` |
+| `engine.variant` | `"tesseract"` | `"mineru"` |
+| `engine.version` | tesseract 版本 | MinerU 版本 |
+| `engine.tier` | —（无档位概念） | `"flash"` / `"basic"` / `"standard"` / `"advanced"`（**四档**，官方枚举见 [`local-infra.md`](./local-infra.md) M11；⚠️ 不得硬编码三档） |
+| 文本粒度 | `pages[].text`（整页）+ `pages[].words[]`（**词级** bbox + 置信度） | `blocks[]`（**块级** bbox + 类型） |
+| **块类型集合** | —（只有 text 概念） | ⚠️ **开放集合且随档位变**：实测 `text` / `paragraph_title` / `table` / `image` / **`chart`**（advanced 把图叫 `chart`、standard 叫 `image`）⇒ **不能用封闭枚举**，未知类型原样保留 |
+| **块载荷字段** | — | ⚠️ **随类型变**：`text`/`paragraph_title` = `{type,bbox,content}`(+`level`)；`table`/`image`/`chart` 多 `captions`/`footnotes`/`image_source`(+`sub_type`) ⇒ **schema 要允许额外字段**；⚠️ **图片块的 `content` 是空串** |
+| **bbox 单位** | ⚠️ **像素**（记 `pixelWidth/pixelHeight/dpi`） | ⚠️ **归一化 0~1 的四点**（x0,y0,x1,y1）—— 与 tesseract **单位不同**，消费方必须按 `variant` 区分；**分母是 `pageWidthPt/pageHeightPt`** |
+| 置信度 | ✅ 每词有 | ❌ **没有** —— 消费方不得假设存在 |
+| `strategy` | ✅ 有（fill / override） | ❌ **没有** —— MinerU 不区分，v2 固定 `"override"` 语义（整份替换） |
+| `engine.preprocess` | ✅ 有（纯 JS 预处理） | ❌ **没有** —— 预处理在 MinerU 内部完成，ZCode 不可见 |
+| `engine.assets` | ✅ 语言包资产组 → 版本 | ⚠️ MinerU 模型仓库 → 版本（`<tier>` + `<small-backend>` + `<vlm-engine>` 组合） |
+
+⚠️ **没有存量消费者**（本条线的 spec 全部未实现），所以这次契约变更**不需要对外版本递增**，但**必须显式记录版本号**（`version: 2`）并让消费方按 `engine.variant` 分流。
+
+**MinerU 变体（v2）示例 JSON** —— ⚠️ 上一版只给了差异表、没有示例，导致 `source` 在不在、`blocks` 在顶层还是在 `pages[]` 下、`generatedAt` 在不在全无定义：
+
+```json
+{
+  "version": 2,
+  "source": {
+    "path": "扫描件.pdf",
+    "sha256": "…",
+    "bytes": 4821003,
+    "mtimeMs": 1762000000000
+  },
+  "engine": {
+    "name": "mineru",
+    "variant": "mineru",
+    "version": "4.1.7",
+    "tier": "basic",
+    "pageWidthPt": 595.0,
+    "pageHeightPt": 842.0
+  },
+  "strategy": "override",
+  "pages": [
+    {
+      "page": 1,
+      "text": "（该页各 text 类块的 content 按顺序拼接）",
+      "blocks": [
+        { "type": "text", "bbox": [0.096, 0.366, 0.889, 0.658], "content": "合同纠纷案件编号 2024-001" },
+        { "type": "paragraph_title", "bbox": [0.1, 0.2, 0.3, 0.22], "content": "证据材料一", "level": 2 },
+        { "type": "table", "bbox": [0.098, 0.223, 0.858, 0.325], "content": "…",
+          "captions": [], "footnotes": [], "image_source": "images/page_0_table_5.jpg" }
+      ]
+    }
+  ],
+  "generatedAt": 1762000000000
+}
+```
+
+⚠️⚠️ **v2 的 `pages[].text` 只能由 blocks 聚合得到** —— MinerU 的 `markdown.md` **没有页锚点**（实测 4 个产物 `<!--` 计数全 0），**不能**从 markdown 切页。
+
+⚠️ **`engine.pageWidthPt` / `pageHeightPt` 是 bbox 的分母**（来自 `extensions.docvortex_layout.pages[]`，实测 595×842 pt）—— ⚠️ **必须有它，消费方才能把归一化 bbox 换算成像素**。tesseract 变体记的是 `pixelWidth/pixelHeight/dpi`，**两个变体要对齐**（R9）。
+
+⚠️ **`blocks[]` 的 `type` 是开放字符串** —— 实测出现过 `text` / `paragraph_title` / `table` / `image` / **`chart`**，且⚠️ **类型名随档位变**（同一张图 standard/flash 叫 `image`、advanced 叫 `chart`）⇒ schema **不能**用封闭枚举。
+
+⚠️ **`blocks[]` 的载荷随类型变** —— `text`/`paragraph_title` = `{type,bbox,content}`（+`level`）；`table`/`image`/`chart` 多 `captions`/`footnotes`/`image_source`（+`sub_type`）⇒ schema **必须允许额外字段**。且⚠️ **图片块的 `content` 是空字符串**（图片本体只由 `image_source` 指向）。
+
+⚠️ **`source.sha256` 是两个变体共有的失效判据**（§6.1 与本节的 `source` 块同构）—— 知识索引（§6.4）按它判 sidecar 是否作废，这条**对两个变体都成立**。
+
+⚠️ **降级不是 sidecar 的一种形态**：一次任务只用一个引擎，sidecar 的 `engine` 块如实记实际用的那个。**不产生混合产物**（[`local-infra.md`](./local-infra.md) §5.1）。
 
 ### 6.2 office-runtime 接入
 
@@ -521,6 +704,8 @@ sidecar 的页号 → office-runtime 的锚点：`page:N`（1 基）。**一一�
 
 ### 6.4 sidecar 也是本地知识库的索引源
 
+⚠️ **MinerU 变体（v2）怎么填 `pagesByNumber`**：v2 的 `pages[].text` 是**该页的 markdown 文本**（由 `<!-- page N of M -->` 锚点切出），不是 tesseract 那种逐词拼接的纯文本 —— 消费方要理解这一点。`pagesByNumber` 两种变体都能填，但**填进去的内容语义不同**（tesseract = 纯识别文本；MinerU = 含版面结构的 markdown）。
+
 客户端本地知识库（[`knowledge-rag.md`](./knowledge-rag.md)）把扫描件 PDF 的 OCR 文本作为索引来源，锚点同样是 `page:N`。**优先级规则**：同一 PDF 同时有文本层与 sidecar → **用文本层**（更准更全），sidecar 只在抽不出文本层时兜底；两者不合并。
 
 sidecar 的 `source.sha256` 不匹配（源文件已改）→ 该 sidecar 作废，索引器按「无文本层」处理，不采信过期文本。
@@ -553,7 +738,9 @@ sidecar 的 `source.sha256` 不匹配（源文件已改）→ 该 sidecar 作废
 
 | 状态 / 事件流 | 唯一所有者 | 备注 |
 | --- | --- | --- |
-| 引擎可用性与版本探测 | `apps/zcode-cli/packages/adapters/src/ocr/tesseract.ts` 的 `probe()` | 每次运行探测一次，结果缓存到本次进程 |
+| **MinerU 的引擎可执行文件定位 / 档位选择 / 降级决定 / 产物收集** | **`apps/zcode-cli/packages/adapters/src/local-infra/`**（[`local-infra.md`](./local-infra.md)） | ⚠️ **能力层不自己探环境、不自己选引擎** —— 档位与降级归 `LocalInfraPort`（§4 开头） |
+| tesseract 路线可用性与版本探测 | `apps/zcode-cli/packages/adapters/src/ocr/tesseract.ts` 的 `probe()` | 每次运行探测一次，结果缓存到本次进程 |
+| **`ocr.*` 配置键（`enginePath` / `popplerPath` / `mineruPath` / `mineruProxy`）** | **配置 schema（`adapters/src/config/schema.ts`）** | ⚠️ `ZCodeConfigFileSchema` 当前**无 `ocr` 段** ⇒ 必须**先加段、再加 `.pick()` 白名单**，顺序反了 zod v4 会在 import 时抛 `Unrecognized key` ⇒ **整个 CLI 启动即死**（[`local-infra.md`](./local-infra.md) §7.7） |
 | 渲染与识别的子进程调度 | `ExecutionPort` | 超时 / 取消 / 输出截断由既有执行入口统一管 |
 | TSV → 结构的归一 | `apps/zcode-cli/packages/adapters/src/ocr/tsv.ts` | 纯函数：TSV 文本 → `OcrEnginePage[]`，最好测 |
 | **预处理步骤的判定（auto / none / full / 显式列表）** | `apps/zcode-cli/packages/capabilities/src/capabilities/ocr.ts` | 能力层决定「做哪几步」；端口只执行 |
@@ -565,7 +752,7 @@ sidecar 的 `source.sha256` 不匹配（源文件已改）→ 该 sidecar 作废
 | 页文本的补齐（文本层 vs OCR） | `apps/zcode-cli/packages/office-runtime/src/adapters/parse/pdf.ts` | 解析层的唯一决策点 |
 | **引擎调用与预处理算法本身** | **`apps/zcode-cli/packages/adapters/src/ocr/`** | **业务客户端不持有实现**，只消费 CLI 信封 + sidecar（§6.5） |
 | **语言包资产（tessdata）的获取 / 校验 / 切换** | `apps/zcode-cli/packages/adapters/src/local-assets/`（[`model-assets.md`](./model-assets.md)） | 资产层只管文件，不碰引擎 |
-| **tessdata 路径的解析** | OCR 能力层调 `LocalAssetPort.resolveGroup()` | ⚠️ **每次识别前解析，不缓存** —— 缓存会让「切换在调用前生效」落空（`model-assets.md` §7） |
+| **tessdata 路径的解析** | OCR 能力层调 `LocalAssetPort.resolveGroup()` | ⚠️ **每次识别前解析，不缓存** —— 缓存会让「切换在调用前生效」落空（`model-assets.md` §7）。⚠️ **只对 tesseract 路线**；MinerU 路线不碰 tessdata（v1 不涉及资产层） |
 | **「什么时候 OCR / 结果去哪 / 要不要重试复核」** | **业务客户端** | 纯业务决策，不进 ZCode 契约 |
 
 **执行链路与 owner 图**（一次 `zcode cap run ocr` 的完整时序）
@@ -626,8 +813,8 @@ adapters/ocr/sidecar-store.ts   ← 唯一的 sidecar 写入点（FileSystemPort
 | 情形 | 引擎层码 | **对外 `error.code`** | CLI 退出码 | 说明 |
 | --- | --- | --- | --- | --- |
 | tesseract 不可用（没装 / 不在 PATH / `--engine` 指错） | `engine_unavailable` | `unavailable` | `1` | `hint` 给装法：`brew install tesseract` / `apt install tesseract-ocr`；`details.engineCode = "engine_unavailable"` |
-| 语言资产缺失（要 chi_sim 但只有 eng） | `language_missing` | `unavailable` | `1` | **语言资产由 ZCode 托管**（[`model-assets.md`](./model-assets.md)）→ 提示 `zcode asset install tessdata-zh-en`，不再让用户去装 tessdata-lang；`details.missingLanguages` |
-| **语言资产组未安装 / 未激活** | 资产层 `not_found` | `unavailable` | `1` | 同样指向 `zcode asset`；`details.assetCode` / `details.group` |
+| 语言资产缺失（要 chi_sim 但只有 eng） | `language_missing` | `unavailable` | `1` | **语言资产由 ZCode 托管**（[`model-assets.md`](./model-assets.md)）→ 提示 `zcode-infr-manage asset install tessdata-zh-en`，不再让用户去装 tessdata-lang；`details.missingLanguages` |
+| **语言资产组未安装 / 未激活** | 资产层 `not_found` | `unavailable` | `1` | 同样指向 `zcode-infr-manage asset`；`details.assetCode` / `details.group` |
 | **TSV 产物缺失但退出码为 0** | `process_failed` | `internal` | `1` | 回归 §2 的「缺 `configs/` → 静默失败」坑 → adapter 必须**专门断言 `<outbase>.tsv` 存在且非空**（tesseract 会退回写出 `.txt`，只查「有文件」会误判成功） |
 | 引擎在但 `probe` 返回可用，跑起来却失败 | `process_failed` | `internal` | `1` | `details.engineCode` + stderr 尾（**不含路径里的凭据**，本命令无凭据） |
 | 输入不是 PDF / 图片 | `unsupported_input` | `unsupported_input` | `1` | |
@@ -637,6 +824,16 @@ adapters/ocr/sidecar-store.ts   ← 唯一的 sidecar 写入点（FileSystemPort
 | **预处理失败**（解码失败 / 估角异常 / 写 PGM 失败） | — | — | — | **降级**：跳过预处理，把原图直接交给引擎，该页记一条 warning。预处理是**增益**不是**前提**，不该因为它把整页 OCR 拖垮 |
 | 用户取消 | `cancelled` | `cancelled` | `130` | |
 | 超时 | `timeout` | `timeout` | `124` | 单页超时上限默认 120s，整批上限默认 30min |
+
+**MinerU 路线补充**（引擎层码见 [`local-infra.md`](./local-infra.md) §7.6）：
+
+| 情形 | 引擎层码 | **对外 `error.code`** | CLI 退出码 | 说明 |
+| --- | --- | --- | --- | --- |
+| MinerU 没装 / 跑不起来 | `engine_unavailable` | `unavailable` | `1` | `hint` 给装法（`uv tool install "mineru>=4.0,<5"`）；**用户自装，ZCode 不代装**（[`local-infra.md`](./local-infra.md) §3.1） |
+| 显式档位不可用 | — | **不报错** | `0` | **降级 + 告知**：降到可用档位重跑一次，原因写进 `metrics.warnings[]`（[`local-infra.md`](./local-infra.md) §5.2） |
+| MinerU 退出码 0 但**产物缺失** | `artifact_missing` | `internal` | `1` | ⚠️ **不得当成功** —— 与上面 TSV 那行同一个坑 |
+
+⚠️ **降级不是错误**：档位降级属"可用优先"（D3），走 `metrics.warnings[]` + 成功退出，**不进 `error`**。只有"全链都不可用"才是 `unavailable`。
 
 **部分成功**：命令整体 `ok: true`，但 `output.ocrPages` / `skippedPages` 里能看出哪些页没成，失败页进 `metrics.warnings`。**不要**因为一页失败就整批报错 —— 100 页扫描件里挂 1 页，其余 99 页的文本仍然有用。
 
@@ -656,6 +853,17 @@ adapters/ocr/sidecar-store.ts   ← 唯一的 sidecar 写入点（FileSystemPort
 | 字体 | 只影响**测试语料**生成，不影响生产路径 |
 
 **剩余风险**：Windows 上 `tesseract` 与 poppler 默认不进 PATH → 首跑大概率 `engine_unavailable`。这是**明确的环境缺失错误**，不是静默降级；本 spec 不内置引擎二进制（体积 + 许可 + 打包复杂度），装法写进提示文案。
+
+### 9.1 MinerU 路线的跨平台要点
+
+| 关注点 | 处理 |
+| --- | --- |
+| 可执行文件 | `mineru` / `mineru-kit`；查找顺序 = 配置键 `ocr.mineruPath` > PATH > 常见 venv 位置（`~/.local/bin`、项目 `.venv/bin`、Windows 的 Python `Scripts`、uv/pipx shim 目录）。⚠️ **官方 uv 装法把可执行文件放在 venv 的 `bin/` 里，通常不在 PATH**（[`local-infra.md`](./local-infra.md) §7.7） |
+| Python 版本 | MinerU 4.x 要求 `>=3.11,<3.15`（官方推荐 3.12）。**Windows + 3.13 曾有 ray 依赖不兼容的记录** |
+| 服务传输 | 只用 TCP（`MINERU_DOCLIB_TCP_ENABLED=1` + `MINERU_DOCLIB_TCP_PORT=0` 由 MinerU 分配端口）。⚠️ **不用 UDS** —— UDS 在 Windows 上不可靠（[`local-infra.md`](./local-infra.md) §6.3.2） |
+| **代理环境变量** | ⚠️ **实测踩坑**：`ALL_PROXY` / `http_proxy` / `https_proxy` 指向 SOCKS 代理时，MinerU 的 httpx 会因缺 `socksio` 直接失败（`Using SOCKS proxy, but the 'socksio' package is not installed`）。ZCode spawn MinerU 时**必须显式决定代理环境**（剥离或保留），不能默认继承 —— 与 [`model/http-proxy.md`](./model/http-proxy.md)「不继承 `HTTP_PROXY` / `HTTPS_PROXY`」的既有纪律一致 |
+| 模型源 | 直连 HuggingFace 在国内通常不通，ModelScope 可直连。下载源要可指定（`--source modelscope`），否则用户会卡在超时 |
+| 凭据 | MinerU 的本地 token 存在自己的 config 里，**ZCode 不读、不记、不日志**（AGENTS.md 凭据纪律） |
 
 ## 10. 验收
 
@@ -729,10 +937,11 @@ adapters/ocr/sidecar-store.ts   ← 唯一的 sidecar 写入点（FileSystemPort
 1. **要不要把 OCR 做成内置工具（投影 C）？** 倾向做：Agent 遇到「这页没文字」时可以自己调。但它有工作区写副作用（写 sidecar），权限面要单独定。→ 归 `capability-registry.md` **§11 未决问题 4**（内置工具默认关还是开）与 **§11 未决问题 8**（投影 C 何时做）一起定。
 2. **要不要 OCR 图片（非 PDF）？** 本 spec 的契约已含图片输入（直接识别原图），但**图片的文字层放哪**没定：sidecar 同样适用（`<img>.png.zcode-ocr.json`），但 ZCode 现有的图片通道是**直接送视觉模型**，不读 sidecar。要不要让视觉模型优先读 OCR 文本（省 token、也防幻觉）？→ 单独议题，本期只保证 OCR CLI 本身可用。
 3. **版面还原（表格 / 栏序）？** v1 不做。tesseract 有 `--psm` 和 TSV 的 block/paragraph 结构可以粗略还原单栏顺序，但表格需要 hOCR/PDX。→ 需要时另写 spec。
-4. **要不要换 OCR 引擎？** 端口契约（`OcrEnginePort`）已经把引擎抽象出去，将来可加 PaddleOCR / macOS Vision / 云端引擎而不改能力层。
+4. ✅ **已定（2026-11-08）：引擎换成 MinerU**。见 [`local-infra.md`](./local-infra.md) —— 引擎层扩展为**档位链**（`mineru-advanced → mineru-standard → mineru-basic → mineru-flash`，四档）。原来的 `OcrEnginePort` **只覆盖 tesseract 一条路线**，MinerU 走 `LocalInfraPort`（§4 开头）。⚠️ **v1 的降级链里没有 tesseract**（D8：tessdata 资产层未实现，用系统 tessdata 会违反可复现性规则）—— tesseract 兜底留二期，与资产层一起做。
+   - **PP-OCR ONNX：不再单列** —— MinerU 的档位链已覆盖"轻量本地引擎"这一格（`basic` 档约 0.8GB 模型 / 2GB 内存 / 纯 CPU）。
    - **云端引擎会推翻「本地 OCR」决策**，加之前要重新对齐。
-   - **macOS Vision 等平台原生引擎：暂不考虑**（用户已定）。它零依赖零模型，本可作为低成本高精度选项，但既然 `tesseract + ZCode 托管语言包` 这条路已通，暂不引入第二条引擎线。
-   - **PP-OCR ONNX：二期**，前置条件是**真实扫描件的对比数据** —— 现有 CER 全部来自合成清晰页（tesseract 已达 4.58%），测不出真实件的差距。换引擎还会改 sidecar 的 bbox 格式（四点八数）→ 触发对外契约版本递增。详见 [`model-assets.md`](./model-assets.md) §14。
+   - **macOS Vision 等平台原生引擎：暂不考虑**（用户已定）。
+   - ⚠️ **tesseract 兜底在 v1 不实现**（[`local-infra.md`](./local-infra.md) §3.2）：tessdata 资产层未落地，用系统 tessdata 会违反「不得依赖系统 tessdata」的可复现性规则。⇒ **v1 里"用户压根没装 MinerU"是硬失败**（`unavailable` + 装法 hint），这是已知代价。
 5. **sidecar 是否入 git？** 它是可重建的派生物，默认不该进版本库。建议加 `.gitignore` 规则 `*.zcode-ocr.json`；但用户可能想把 OCR 结果作为交付物提交 → 留一个 `--keep-in-repo`？→ 简单起见默认不入 git，是否忽略由用户的 `.gitignore` 决定（我们不自动改用户的 gitignore）。
 6. **`--psm` 要不要按页自动选？** 固定 4 在本轮样本里最优，但表格页 / 票据页可能需要 6（均匀块）或 11（稀疏文本）。要不要按页先跑一次自动判定？→ v1 不做（多跑一遍的代价大，且错选比统一 4 更难预测）；先把 `--psm` 暴露给用户。
 7. **预处理产物要不要可留档？** 目前 PGM 识别完就删，只在 sidecar 里留 `applied` + `skewAngle`。疑难件排查时可能想看「预处理后那张图长什么样」→ 是否加 `--keep-preprocessed` 把中间产物留在工作区？→ 默认不留（工作区不放大件），需要时再定。

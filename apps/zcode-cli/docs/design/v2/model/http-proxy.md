@@ -39,6 +39,10 @@ No Proxy 对以上代理来源都生效，支持 `*`、精确 host、host:port�
 
 运行时继承环境会过滤 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`、`NODE_EXTRA_CA_CERTS` / `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` / `CURL_CA_BUNDLE` / `GIT_SSL_CAINFO` 以及包管理器代理/CA 变量。过滤前会把这些用户 shell 网络变量封存到 ZCode 内部 `ZCODE_TOOL_ENV_PASSTHROUGH_JSON`；该变量不参与 app/provider/通用 `HttpClientPort` 的代理解析，只作为 `WebFetch` 专用 fallback，或在 tool 子进程环境构造时恢复。
 
+⚠️ **例外：本地模型工具链的下载子进程默认剥离代理**。MinerU（`mineru-kit`）的 httpx 读到 SOCKS 代理会因缺 `socksio` 直接失败（实测：`Using SOCKS proxy, but the 'socksio' package is not installed`），而模型源直连 ModelScope 在国内可用、直连 HuggingFace 超时。⇒ `zcode-infr-manage` 拉起 `mineru-kit models download` 时**默认剥离** `ALL_PROXY` / `all_proxy` / `http_proxy` / `https_proxy` / `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` / `no_proxy`，可用 `ocr.mineruProxy: "inherit"` 改回继承。
+
+⇒ 这条**只作用于该下载子进程**，不改变上面「子进程先恢复用户 shell 网络变量」的通则；**解析子进程不受影响**（模型就绪后 `mineru-kit parse` 是纯本地推理，不联网）。规格见 [`local-infra.md`](../local-infra.md) §7.9。
+
 子进程代理与证书环境先恢复用户 shell 网络变量，再由显式网络策略覆盖同类目标。如果命中 `network.httpProxy`、`AppSettings.httpProxy` 或 `ZCODE_HTTP_PROXY`，adapter 会补齐 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 及小写形式；如果命中 `network.noProxy`、`AppSettings.httpProxyNoProxy` 或 `ZCODE_NO_PROXY`，adapter 会补齐 `NO_PROXY` 与 `no_proxy`；如果命中 `network.caCertFile`、`AppSettings.httpProxyCaCertPath` 或 `ZCODE_AGENT_CA_CERT`，adapter 会补齐 `NODE_EXTRA_CA_CERTS`、`SSL_CERT_FILE`、`REQUESTS_CA_BUNDLE`、`CURL_CA_BUNDLE` 和 `GIT_SSL_CAINFO`，提升 Node、OpenSSL/curl、Python requests 和 git 的一致性。`env.base: "empty"` 的命令不恢复用户 shell passthrough，只保留显式网络配置和命令级 overlay。
 
 ## 行为
