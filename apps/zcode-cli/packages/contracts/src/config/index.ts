@@ -4,7 +4,7 @@ import type { CollaborationMode } from "../interfaces/session.port.js";
 import type { McpServerConfig } from "../interfaces/mcp.port.js";
 import type { HooksRuntimeConfig, HooksRuntimeConfigPatch } from "../hooks/index.js";
 import type { PluginConfig, PluginOptionValues } from "../plugins/index.js";
-import type { MineruProxyPolicy } from "../interfaces/local-infra.port.js";
+import type { DegradationPolicy, MineruProxyPolicy } from "../interfaces/local-infra.port.js";
 
 // ============================================================
 // Config Key Types
@@ -295,6 +295,12 @@ export interface OcrRuntimeConfig {
   enginePath?: string;
   /** poppler 可执行路径（`ocr-local.md` §9）。v1 不接，先占位。 */
   popplerPath?: string;
+  /**
+   * 能力不可用时的降级策略（spec：docs/design/v2/capability-provisioning.md §6）。
+   *
+   * ⚠️ 默认 `error`；`cloud` 是**预留成员**，v1 配了会明确报错，不会悄悄按 `error` 执行。
+   */
+  degradation?: DegradationPolicy;
 }
 
 export type SupportedLocale = "en-US" | "zh-CN";

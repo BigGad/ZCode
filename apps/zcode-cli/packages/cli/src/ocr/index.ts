@@ -1,9 +1,9 @@
-import type { LocalInfraConfig, LocalInfraPort, MineruProxyPolicy } from "@zcode/contracts";
+import type { LocalInfraConfig, LocalInfraPort } from "@zcode/contracts";
 import { createLocalInfraPort } from "@zcode/adapters/local-infra";
 import { createNodeExecutionAdapter } from "@zcode/adapters/exec";
 import { createNodeFileSystemAdapter } from "@zcode/adapters/fs";
 import { createPopplerPdfDocumentAdapter } from "@zcode/adapters/pdf";
-import { loadFileConfig, loadProjectConfigs } from "@zcode/adapters/config";
+import { loadOcrRuntimeSettings } from "@zcode/adapters/config";
 import { parseOcrArgs, type OcrCommandInput } from "./arguments.js";
 import { runDoctorCommand } from "./doctor-command.js";
 import { runModelsDownloadCommand } from "./models-command.js";
@@ -116,7 +116,7 @@ async function createDefaultRuntime(options: OcrCommandOptions): Promise<OcrRunt
   const workingDirectory = options.workingDirectory ?? process.cwd();
   const execution = createNodeExecutionAdapter();
   const fileSystem = createNodeFileSystemAdapter();
-  const config = loadLocalInfraConfig(workingDirectory);
+  const config = loadOcrRuntimeSettings(workingDirectory).infra;
   const port = createLocalInfraPort({
     execution,
     fileSystem,
@@ -129,38 +129,14 @@ async function createDefaultRuntime(options: OcrCommandOptions): Promise<OcrRunt
 /**
  * 读 `ocr.*` 配置键。
  *
- * ⚠️ **层级**：项目级配置 > 用户级配置（`~/.zcode/cli/config.json`）。
- * 项目级走既有的配置发现（`.agents` 协议 / `.zcode/config.json` / `zcode.json`），
- * 不自己拼路径 —— 配置发现只有一处所有者。
+ * ⚠️ **层级与字段挑选只有一处所有者**：`@zcode/adapters/config` 的
+ * `loadOcrRuntimeSettings`（spec：capability-provisioning.md §8.2）。
+ * 命令面与 runtime 的能力供给层必须看到**同一份**引擎路径与降级策略，
+ * 否则 `zcode ocr doctor` 体检出来的环境和实际用的不是一套。
  *
  * ⚠️ **只取 `mineruPath` / `mineruProxy`**：`enginePath` / `popplerPath` 是
  * tesseract 路线（`ocr-local.md` §9）的旋钮，v1 不接。
  */
 export function loadLocalInfraConfig(workingDirectory: string): LocalInfraConfig {
-  const user = loadFileConfig(undefined, { scope: "user" });
-  const project = loadProjectConfigs(workingDirectory);
-
-  let merged: LocalInfraConfig = {};
-  for (const layer of [user.config.ocr, ...project.files.map((file) => file.config.ocr)]) {
-    merged = {
-      ...merged,
-      ...pickLocalInfraFields(layer),
-    };
-  }
-  return merged;
-}
-
-function pickLocalInfraFields(
-  layer:
-    | {
-        mineruPath?: string;
-        mineruProxy?: MineruProxyPolicy;
-      }
-    | undefined,
-): LocalInfraConfig {
-  if (layer === undefined) return {};
-  return {
-    ...(layer.mineruPath !== undefined ? { mineruPath: layer.mineruPath } : {}),
-    ...(layer.mineruProxy !== undefined ? { mineruProxy: layer.mineruProxy } : {}),
-  };
+  return loadOcrRuntimeSettings(workingDirectory).infra;
 }

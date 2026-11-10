@@ -2,19 +2,23 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { resolvePath } from "@zcode/adapters/config";
+import { loadOcrRuntimeSettings } from "@zcode/adapters/config";
 import { createNodeExecutionAdapter } from "@zcode/adapters/exec";
 import { createNodeFileSystemAdapter } from "@zcode/adapters/fs";
 import { createNodeWebFetchHttpClientAdapter } from "@zcode/adapters/http";
 import { createJimpImageProcessorAdapter } from "@zcode/adapters/image";
+import { createLocalInfraPort } from "@zcode/adapters/local-infra";
 import { createNodeSessionMailboxAdapter } from "@zcode/adapters/mailbox";
 import { createMcpAdapter } from "@zcode/adapters/mcp";
 import { createPopplerPdfDocumentAdapter } from "@zcode/adapters/pdf";
 import { createWorkspaceResourceIndexPort } from "@zcode/adapters/storage";
 import type {
+  DegradationPolicy,
   ExecutionPort,
   FileSystemPort,
   HttpClientPort,
   ImageProcessorPort,
+  LocalInfraPort,
   Logger,
   McpPort,
   PdfDocumentPort,
@@ -64,6 +68,10 @@ export interface WiredPorts {
   ownsMcpPort: boolean;
   providerEndpointRoutingPort: ProviderEndpointRoutingPort | undefined;
   workspaceResourceIndexPort: WorkspaceResourceIndexPort;
+  /** 本地解析基础设施端口（能力供给层的依赖）。 */
+  localInfraPort: LocalInfraPort;
+  /** 能力不可用时的降级策略（默认 `error`）。 */
+  localInfraDegradation: DegradationPolicy;
 }
 
 export function wirePorts(context: WirePortsContext): WiredPorts {
@@ -196,6 +204,21 @@ export function wirePorts(context: WirePortsContext): WiredPorts {
     logger,
   });
 
+  // 本地解析基础设施（spec：docs/design/v2/capability-provisioning.md §8.3）：
+  // 能力供给层靠它体检本机引擎并在模型读不了 PDF 时自动走本地 OCR。
+  // ⚠️ 配置只在这里读一次 —— `zcode ocr` 命令组与 runtime 必须看到同一份引擎路径与降级策略。
+  const ocrSettings = loadOcrRuntimeSettings(workingDirectory, {
+    ...(options.userConfigPath !== undefined ? { userConfigPath: options.userConfigPath } : {}),
+  });
+  const localInfraPort =
+    options.localInfraPort ??
+    createLocalInfraPort({
+      execution: executionPort,
+      fileSystem: fileSystemPort,
+      config: ocrSettings.infra,
+      pdf: pdfDocumentPort,
+    });
+
   return {
     imageProcessorPort,
     pdfDocumentPort,
@@ -208,5 +231,7 @@ export function wirePorts(context: WirePortsContext): WiredPorts {
     ownsMcpPort,
     providerEndpointRoutingPort,
     workspaceResourceIndexPort,
+    localInfraPort,
+    localInfraDegradation: ocrSettings.degradation,
   };
 }

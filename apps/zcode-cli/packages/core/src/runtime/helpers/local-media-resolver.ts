@@ -15,6 +15,13 @@ import { isPdfBytes, PDF_INPUT_MAX_BYTES } from "./attachment-pdf.js";
 import { renderLocalPdfPageImages } from "./attachment-pdf-local-render.js";
 import { resolvedPathReferenceAttachment } from "./attachment-path-reference.js";
 import { upsertAttachmentToResourceIndex } from "./attachment-resource-index.js";
+import {
+  buildLocalOcrFailureText,
+  buildLocalOcrText,
+  decideProvisioning,
+  provisionLocalOcr,
+} from "./capability-provisioning/index.js";
+import type { LocalInfraProvisioning } from "./capability-provisioning/index.js";
 import type { InlineMediaResolverOptions } from "./inline-media-resolver.js";
 
 export interface LocalMediaResolverOptions extends Omit<
@@ -22,6 +29,8 @@ export interface LocalMediaResolverOptions extends Omit<
   "existingArtifactUri"
 > {
   fileSystemPort: FileSystemPort;
+  /** 能力供给层（本地 OCR）；缺席即不做供给，附件走既有路线。 */
+  localInfra?: LocalInfraProvisioning;
   workingDirectory: string;
 }
 
@@ -176,7 +185,177 @@ async function resolveLocalPdfAttachment(
     source,
   });
   if (rendered) return rendered;
+  // ⚠️ 本地 OCR 分支（spec：capability-provisioning.md §8.3）：
+  // 插在「页图渲染不可用」与「回落 file block」之间 —— 前两条路都不通时才考虑本地引擎。
+  // 判定不委派（模型能力位未知 / 端口未装配）⇒ 返回 undefined，走既有 file block 路线。
+  const ocr = await resolveLocalPdfByOcr(context, read.sizeBytes, read.revision?.hash);
+  if (ocr) return ocr;
   return fileBlockResult();
+}
+
+/**
+ * 本地 OCR 路线（spec §7.2 第 6/7/8/9 行 + §11 行）。
+ *
+ * ⚠️ **返回 undefined = 不委派**（走既有路线）；返回附件 = 本地 OCR 的结果或明确的错误文本。
+ */
+async function resolveLocalPdfByOcr(
+  context: LocalMediaContext,
+  sizeBytes: number,
+  sha256: string | undefined,
+): Promise<ResolvedTurnAttachment | undefined> {
+  const { absolutePath, attachment, filename, options, source } = context;
+  const localInfra = options.localInfra;
+  if (localInfra === undefined) return undefined;
+
+  const decision = await decideProvisioning({
+    attachmentKind: "pdf",
+    ...(options.modelInputFormat !== undefined
+      ? { modelInputFormat: options.modelInputFormat }
+      : {}),
+    degradation: localInfra.degradation,
+    resolveReadiness: localInfra.resolveReadiness,
+  });
+  if (decision.route === "existing") return undefined;
+
+  if (decision.route === "error") {
+    // 明确报错：缺哪一层 + 确定的下一步（装法 / 下载命令），不静默失败、不静默换路。
+    const text = buildLocalOcrFailureText({ filename, decision });
+    return resolvedOcrTextAttachment(context, {
+      text,
+      bytes: Buffer.byteLength(text, "utf8"),
+    });
+  }
+
+  // 本地引擎路线：产物必须落**会话级 artifact 目录**（D9），不得落在用户源文件旁。
+  const outputDir = await resolveOcrOutputDir(options, context.index);
+  if (outputDir === undefined) {
+    const failureDecision = {
+      ...decision,
+      route: "error" as const,
+      ruleId: "rule-9" as const,
+      reason: "无法解析会话级产物目录，本地 OCR 产物无处落盘。",
+    };
+    const text = buildLocalOcrFailureText({ filename, decision: failureDecision });
+    return resolvedOcrTextAttachment(context, {
+      text,
+      bytes: Buffer.byteLength(text, "utf8"),
+    });
+  }
+
+  const outcome = await provisionLocalOcr({
+    absolutePath,
+    outputDir,
+    ...(decision.readiness?.tier !== undefined ? { tier: decision.readiness.tier } : {}),
+    localInfraPort: localInfra.port,
+    fileSystemPort: options.fileSystemPort,
+    traceContext: options.traceContext,
+    ...(options.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+  });
+
+  if (!outcome.ok) {
+    return resolvedOcrTextAttachment(context, {
+      text: buildLocalOcrFailureText({ filename, decision, failure: outcome }),
+      bytes: 0,
+    });
+  }
+
+  registerOcrVariant(context, {
+    bytes: outcome.bytes,
+    markdownPath: outcome.markdownPath,
+    sizeBytes,
+    sha256,
+  });
+
+  return resolvedOcrTextAttachment(context, {
+    text: buildLocalOcrText({
+      filename,
+      markdown: outcome.markdown,
+      ...(outcome.tier !== undefined ? { tier: outcome.tier } : {}),
+    }),
+    bytes: outcome.bytes,
+  });
+}
+
+/**
+ * 解析本地 OCR 的产物目录。
+ *
+ * ⚠️ **目录布局由 artifact store 拥有**（`resolveSessionArtifactDir`）——
+ * 业务层不重算 `<storageRoot>/cli/artifacts/<sessionId>/`。
+ * ⚠️ 拿不到目录 ⇒ **放弃这条路**，绝不退回「源文件旁」（D9）。
+ */
+async function resolveOcrOutputDir(
+  options: LocalMediaResolverOptions,
+  index: number,
+): Promise<string | undefined> {
+  const resolveDir = options.artifactStore?.resolveSessionArtifactDir?.bind(options.artifactStore);
+  if (resolveDir === undefined || options.sessionId === undefined) return undefined;
+  try {
+    const resolved = await resolveDir({
+      sessionId: options.sessionId,
+      // 每个附件一个目录：引擎会清空目标目录（prepareOutputDir），共用会互相抹掉。
+      subdir: `ocr-${index}`,
+    });
+    return resolved?.path;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 本地 OCR 的文本附件（成功与失败都是「一段文字」形态）。 */
+function resolvedOcrTextAttachment(
+  context: LocalMediaContext,
+  input: { readonly text: string; readonly bytes: number },
+): ResolvedTurnAttachment {
+  const { attachment, filename, source } = context;
+  return {
+    contentBlock: { type: "text", text: input.text },
+    filename,
+    metadata: {
+      originalUrl: attachment.path,
+      preview: {
+        text: input.text,
+        truncated: false,
+        originalBytes: input.bytes,
+      },
+      recoverability: "provider_ready",
+      sizeBytes: input.bytes,
+      storageKind: "inline",
+    },
+    mime: "text/markdown",
+    source,
+    url: attachment.path ?? filename,
+  };
+}
+
+/** 把 OCR 产物登记成资源索引里的 `ocr` 变体（D10）。 */
+function registerOcrVariant(
+  context: LocalMediaContext,
+  input: {
+    readonly bytes: number;
+    readonly markdownPath: string;
+    readonly sizeBytes: number;
+    readonly sha256?: string;
+  },
+): void {
+  const { absolutePath, attachment, options } = context;
+  if (!options.workspaceKey || !options.workspaceResourceIndexPort) return;
+  upsertAttachmentToResourceIndex(options.workspaceResourceIndexPort, attachment, {
+    workspaceKey: options.workspaceKey,
+    sourceOrigin: "user_upload",
+    ...(attachment.filename ? { filename: attachment.filename } : {}),
+    mime: "application/pdf",
+    bytes: input.sizeBytes,
+    path: absolutePath,
+    ...(input.sha256 !== undefined ? { sha256: input.sha256 } : {}),
+    extraVariants: [
+      {
+        kind: "ocr",
+        mime: "text/markdown",
+        bytes: input.bytes,
+        path: input.markdownPath,
+      },
+    ],
+  });
 }
 
 async function resolveLocalImageAttachment(

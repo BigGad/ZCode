@@ -103,6 +103,19 @@ export type MediaAttachmentPathResult =
   | { status: "ready"; path: string }
   | { status: "unsupported" };
 
+/** 会话级产物目录的解析请求。 */
+export interface SessionArtifactDirRequest {
+  sessionId: SessionId;
+  /** 目录名（相对会话目录）。不给则就是会话目录本身。 */
+  subdir?: string;
+}
+
+/** 会话级产物目录的解析结果。 */
+export interface SessionArtifactDirResult {
+  /** 绝对路径；目录已创建。 */
+  path: string;
+}
+
 export interface ToolArtifactStorePort {
   writeToolResultArtifact(
     request: ToolArtifactWriteRequest,
@@ -138,4 +151,16 @@ export interface ToolArtifactStorePort {
   ensureMediaAttachmentPath?(
     request: MediaAttachmentPathEnsureRequest,
   ): Promise<MediaAttachmentPathResult>;
+  /**
+   * 会话级产物目录（`<rootDir>/<sessionId>`）——**store 自己拥有目录布局**，
+   * 调用方不该重算路径（重算 = 第二处知道布局的知识）。
+   *
+   * ⚠️ 用途：需要落**一整个目录**的能力（如本地 OCR 的 markdown + 图片）用它拿到
+   * 与附件物化产物同处的位置（spec：capability-provisioning.md §2 的 D9）。
+   * ⚠️ 可选：缺席即「本 store 不提供目录」，调用方必须**放弃**这条路线而不是退回源文件旁。
+   */
+  resolveSessionArtifactDir?(
+    request: SessionArtifactDirRequest,
+    options?: { signal?: AbortSignal },
+  ): Promise<SessionArtifactDirResult | undefined>;
 }

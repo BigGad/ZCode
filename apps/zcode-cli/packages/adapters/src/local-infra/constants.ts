@@ -11,8 +11,11 @@ import type { MineruTier } from "@zcode/contracts";
 export const MINERU_KIT_EXECUTABLE = "mineru-kit";
 export const MINERU_EXECUTABLE = "mineru";
 
-/** 未安装时的安装指引（v1 不代装，只提示）。 */
-export const MINERU_INSTALL_HINT = 'uv tool install --python 3.12 "mineru>=4.0,<5"';
+/**
+ * 未安装时的安装指引（v1 不代装，只提示）。
+ * ⚠️ 定义在 contracts —— core 的就绪投影也要用它兜底（core 不许 import adapters）。
+ */
+export { MINERU_INSTALL_HINT } from "@zcode/contracts";
 
 export const HARDWARE_DETECT_TIMEOUT_MS = 30_000;
 export const VERSION_CHECK_TIMEOUT_MS = 20_000;

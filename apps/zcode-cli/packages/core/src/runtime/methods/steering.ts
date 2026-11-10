@@ -43,6 +43,7 @@ import {
 } from "../helpers/index.js";
 import { resolveTurnAttachments } from "../helpers/attachments.js";
 import { resolveCapabilityImageDescriptionPort } from "./capability-image-understanding.js";
+import { resolveLocalInfraProvisioning } from "./capability-provisioning.js";
 import { emitTurnAttachmentPageCounts } from "./turn-attachment-page-counts.js";
 import type {
   ActiveTurnKind,
@@ -1262,6 +1263,8 @@ async function drainPendingInputUnlocked(
       imageProcessorPort: this.imageProcessorPort,
       modelInputFormat: options.modelInputFormat,
       pdfDocumentPort: this.pdfDocumentPort,
+      // 能力供给层：模型既不支持图片也不支持 PDF 时走本地 OCR（capability-provisioning.md）。
+      localInfra: resolveLocalInfraProvisioning(this, options.activeTurn.turnId),
       sessionId: this.sessionId,
       traceContext: inputTraceContext,
       turnId: options.activeTurn.turnId,

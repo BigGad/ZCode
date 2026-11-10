@@ -16,7 +16,14 @@ export type WorkspaceResourceKind =
   | "frame";
 
 export interface WorkspaceResourceVariant {
-  kind: "original" | "transcript" | "frame" | "thumbnail" | "waveform";
+  /**
+   * 变体种类（闭集）。
+   *
+   * ⚠️ `ocr` 是**本地 OCR 的产物变体**（spec：capability-provisioning.md §2 的 D10）：
+   * OCR 产物是「从 PDF 派生出来的文字」，既不是原始文件（`original`）也不是转写（`transcript`），
+   * 复用会让人分不清「这个条目是原件还是解析结果」。
+   */
+  kind: "original" | "transcript" | "frame" | "thumbnail" | "waveform" | "ocr";
   mime: string;
   bytes: number;
   sha256?: string;

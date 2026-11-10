@@ -432,6 +432,8 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       ownsExecutionPort,
       ownsMcpPort,
       workspaceResourceIndexPort,
+      localInfraPort,
+      localInfraDegradation,
     } = wiredPorts;
     markMcpAdapterInitialized({
       configuredMcpServers,
@@ -842,6 +844,10 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       httpClientPort,
       imageProcessorPort,
       pdfDocumentPort,
+      // 能力供给层（spec：docs/design/v2/capability-provisioning.md）：模型读不了 PDF 时
+      // 自动走本机解析引擎。端口缺席即不做供给，附件链维持既有行为。
+      localInfraPort,
+      localInfraDegradation,
       // CLI --pdf-password：无头场景密码 PDF 的非交互解锁来源（message-attachments.md）。
       pdfPassword: options.pdfPassword,
       workspaceResourceIndexPort,

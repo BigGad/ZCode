@@ -48,6 +48,7 @@ import {
   runtimeMetadataForSyntheticUserMessageSource,
 } from "../helpers/index.js";
 import { resolveTurnAttachments } from "../helpers/attachments.js";
+import { resolveLocalInfraProvisioning } from "./capability-provisioning.js";
 import { resolveCapabilityImageDescriptionPort } from "./capability-image-understanding.js";
 import { emitTurnAttachmentPageCounts } from "./turn-attachment-page-counts.js";
 import type { ActiveTurnSteeringState, ExecuteTurnOptions, TurnResult } from "../types.js";
@@ -641,6 +642,8 @@ export async function executeTurnCommand(
           imageProcessorPort: this.imageProcessorPort,
           modelInputFormat: (submissionModel ?? admittedModel)?.properties.inputFormat,
           pdfDocumentPort: this.pdfDocumentPort,
+          // 能力供给层：模型既不支持图片也不支持 PDF 时走本地 OCR（capability-provisioning.md）。
+          localInfra: resolveLocalInfraProvisioning(this, turnId),
           sessionId: this.sessionId,
           traceContext: turnTraceContext,
           turnId,

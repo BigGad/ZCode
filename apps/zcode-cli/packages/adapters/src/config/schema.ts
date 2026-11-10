@@ -61,6 +61,13 @@ export const ocrConfigSchema = z
     enginePath: z.string().optional(),
     /** poppler 可执行路径（`ocr-local.md` §9）。v1 不接，先占位。 */
     popplerPath: z.string().optional(),
+    /**
+     * 能力不可用时的降级策略（spec：docs/design/v2/capability-provisioning.md §6）。
+     *
+     * ⚠️ 默认 `error`（明确失败 + 给出确定的下一步）。
+     * ⚠️ `cloud` 是**预留成员**，v1 未实现 —— 配了会**明确报错**，不会悄悄按 `error` 执行。
+     */
+    degradation: z.enum(["error", "cloud"]).optional(),
   })
   .strict();
 

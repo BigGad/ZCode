@@ -10,6 +10,8 @@ import type {
   AgentTelemetryCausation,
   AttachmentRef,
   BackgroundResultOriginMeta,
+  DegradationPolicy,
+  LocalInfraPort,
   ModelSelections,
   ContextUsageBreakdownItem,
   CoordinatorResponsePort,
@@ -376,6 +378,17 @@ export interface AgentRuntimeDeps {
   httpClientPort?: HttpClientPort;
   imageProcessorPort?: ImageProcessorPort;
   pdfDocumentPort?: PdfDocumentPort;
+  /**
+   * 本地基础设施端口（spec：docs/design/v2/capability-provisioning.md §8.3）。
+   *
+   * ⚠️ **缺席即「本会话不做能力供给」**：附件链保持既有行为，不委派本地 OCR。
+   */
+  localInfraPort?: LocalInfraPort;
+  /**
+   * 能力不可用时的降级策略（配置键 `ocr.degradation`，默认 `error`）。
+   * ⚠️ `cloud` 在 v1 未实现 —— 配了会**明确报错**，不会悄悄按 `error` 执行。
+   */
+  localInfraDegradation?: DegradationPolicy;
   /** CLI 无头注入的全局 PDF 密码（--pdf-password）；仅密码装饰器消费，不落盘不进日志。 */
   pdfPassword?: string;
   workspaceResourceIndexPort?: WorkspaceResourceIndexPort;

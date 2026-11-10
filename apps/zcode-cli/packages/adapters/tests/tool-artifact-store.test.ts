@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, unlink } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -453,6 +453,50 @@ describe("Node tool artifact store", () => {
       });
 
       await expect(readdir(rootDir)).resolves.toEqual([]);
+    } finally {
+      await rm(rootDir, { force: true, recursive: true });
+    }
+  });
+
+  it("resolves the session artifact dir for capability outputs", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "zcode-session-artifact-dir-"));
+    const store = createNodeToolArtifactStore({
+      imageCacheRootDir: join(rootDir, "image-cache"),
+      rootDir,
+      videoCacheRootDir: join(rootDir, "video-cache"),
+    });
+
+    try {
+      const sessionId = createSessionId("session-artifact-dir");
+      const resolved = await store.resolveSessionArtifactDir!({ sessionId, subdir: "ocr-0" });
+
+      // 目录布局只由 store 拥有（spec：capability-provisioning.md §2 的 D9）。
+      expect(resolved.path).toBe(join(rootDir, sessionId, "ocr-0"));
+      expect((await stat(resolved.path)).isDirectory()).toBe(true);
+
+      // 不给 subdir 时落在会话目录本身。
+      const sessionDir = await store.resolveSessionArtifactDir!({ sessionId });
+      expect(sessionDir.path).toBe(join(rootDir, sessionId));
+    } finally {
+      await rm(rootDir, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps the session artifact dir inside the session root", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "zcode-session-artifact-dir-"));
+    const store = createNodeToolArtifactStore({
+      imageCacheRootDir: join(rootDir, "image-cache"),
+      rootDir,
+      videoCacheRootDir: join(rootDir, "video-cache"),
+    });
+
+    try {
+      const sessionId = createSessionId("session-artifact-dir");
+      const resolved = await store.resolveSessionArtifactDir!({ sessionId, subdir: "../escape" });
+
+      // 路径穿越必须被压成单段（分隔符被替换），不得逃出会话目录。
+      expect(resolved.path).toBe(join(rootDir, sessionId, ".._escape"));
+      expect(resolved.path.startsWith(join(rootDir, sessionId))).toBe(true);
     } finally {
       await rm(rootDir, { force: true, recursive: true });
     }

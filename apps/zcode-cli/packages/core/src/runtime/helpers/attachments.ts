@@ -24,6 +24,7 @@ import { resolveInlineMediaAttachment } from "./inline-media-resolver.js";
 import { resolveLocalMediaAttachment } from "./local-media-resolver.js";
 import { resolvedPlaceholderAttachment } from "./attachment-placeholder.js";
 import { inferImageMimeFromPath } from "./attachment-image.js";
+import type { LocalInfraProvisioning } from "./capability-provisioning/index.js";
 import {
   inferAttachmentMimeFromPath,
   isDataOrArtifactUrl,
@@ -46,6 +47,8 @@ type ResolveAttachmentOptions = {
    */
   imageDescription?: ImageDescriptionPort;
   pdfDocumentPort?: PdfDocumentPort;
+  /** 能力供给层（本地 OCR）；缺席即不做供给。 */
+  localInfra?: LocalInfraProvisioning;
   sessionId?: SessionId;
   traceContext: TraceContext;
   turnId?: TurnId;

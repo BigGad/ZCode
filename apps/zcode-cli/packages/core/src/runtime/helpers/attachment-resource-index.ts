@@ -3,6 +3,7 @@ import type {
   TurnAttachment,
   WorkspaceResourceIndexPort,
   WorkspaceResourceIndexEntry,
+  WorkspaceResourceVariant,
 } from "../deps.js";
 
 /**
@@ -30,6 +31,13 @@ export interface UpsertAttachmentToResourceIndexInput {
   /** request-local path，跨 session 不持久化；resource index 仅作 preview reference。 */
   path?: string;
   sha256?: string;
+  /**
+   * 额外的变体（与 `original` 并列登记在同一条目上）。
+   *
+   * ⚠️ 本地 OCR 的产物登记成 `ocr` 变体（spec：capability-provisioning.md §2 的 D10）：
+   * 它是「从原件派生出来的文字」，与 `original` 是两件事。
+   */
+  extraVariants?: readonly WorkspaceResourceVariant[];
 }
 
 export function upsertAttachmentToResourceIndex(
@@ -53,6 +61,14 @@ function buildResourceIndexEntry(
   const now = Date.now();
   const kind = attachmentKindFromAttachment(attachment);
   const id = deriveEntryId(input, kind);
+  const original: WorkspaceResourceVariant = {
+    kind: "original",
+    mime: input.mime,
+    bytes: input.bytes,
+    ...(input.sha256 ? { sha256: input.sha256 } : {}),
+    ...(input.artifactUri ? { artifactUri: input.artifactUri } : {}),
+    ...(input.path ? { path: input.path } : {}),
+  };
   return {
     id,
     workspaceIdentity: input.workspaceKey,
@@ -65,16 +81,8 @@ function buildResourceIndexEntry(
     sourceOrigin: input.sourceOrigin,
     addedAt: now,
     updatedAt: now,
-    variants: [
-      {
-        kind: "original",
-        mime: input.mime,
-        bytes: input.bytes,
-        ...(input.sha256 ? { sha256: input.sha256 } : {}),
-        ...(input.artifactUri ? { artifactUri: input.artifactUri } : {}),
-        ...(input.path ? { path: input.path } : {}),
-      },
-    ],
+    // ⚠️ `original` 在前、派生变体在后：消费方按顺序找第一个可用变体。
+    variants: [original, ...(input.extraVariants ?? [])],
     references: 1,
     ...(input.policyTag || input.policySource
       ? {

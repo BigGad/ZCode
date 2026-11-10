@@ -489,6 +489,7 @@ export {
   type ProjectConfigFile,
 } from "./project-config.adapter.js";
 export { ZCodeConfigFileSchema, type ZCodeConfigFile } from "./schema.js";
+export { loadOcrRuntimeSettings, type OcrRuntimeSettings } from "./ocr-config.js";
 export { mergeConfigs, createPrioritizedConfig, getScopePriority } from "./config-merger.js";
 export {
   createConfig,

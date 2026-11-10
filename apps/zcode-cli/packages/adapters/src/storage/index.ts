@@ -9,6 +9,8 @@ import type {
   MediaAttachmentPathPrimeRequest,
   MediaAttachmentPathEnsureRequest,
   MediaAttachmentPathResult,
+  SessionArtifactDirRequest,
+  SessionArtifactDirResult,
   ToolBinaryArtifactWriteRequest,
   ToolArtifactStorePort,
   ToolArtifactReadRequest,
@@ -214,6 +216,31 @@ export class NodeToolArtifactStore implements ToolArtifactStorePort {
     return this.runMediaAttachmentPathFlight(request.uri, () =>
       this.writeDerivedMediaAttachment(request.uri, request.mediaType, Buffer.from(request.bytes)),
     );
+  }
+
+  /**
+   * 会话级产物目录（`<rootDir>/<sessionId>[/<subdir>]`）。
+   *
+   * ⚠️ **目录布局只在这里有一份知识**（spec：capability-provisioning.md §2 的 D9）：
+   * 需要落一整个目录的能力（本地 OCR 的 markdown + 图片）从这里拿位置，
+   * 不得在业务层重算 `<storageRoot>/cli/artifacts/<sessionId>/`。
+   */
+  async resolveSessionArtifactDir(
+    request: SessionArtifactDirRequest,
+    options?: { signal?: AbortSignal },
+  ): Promise<SessionArtifactDirResult> {
+    if (options?.signal?.aborted) {
+      throw options.signal.reason instanceof Error
+        ? options.signal.reason
+        : new Error("Session artifact dir resolution cancelled");
+    }
+    const sessionDir = join(this.rootDir, sanitizePathSegment(request.sessionId));
+    const target = request.subdir
+      ? join(sessionDir, sanitizePathSegment(request.subdir))
+      : sessionDir;
+    maybeThrowStorageFsFault({ operation: "mkdir", path: target });
+    await mkdir(target, { recursive: true });
+    return { path: target };
   }
 
   ensureMediaAttachmentPath(

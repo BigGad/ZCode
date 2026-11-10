@@ -24,6 +24,30 @@ export const MINERU_TIERS: readonly MineruTier[] = ["flash", "basic", "standard"
 export type MineruProxyPolicy = "strip" | "inherit";
 
 /**
+ * 能力不可用 / 供给失败时的**降级策略**（spec：docs/design/v2/capability-provisioning.md §6）。
+ *
+ * ⚠️ **「不降级」必须表达成「策略取值 = error」，不能表达成「代码里没有那条路」** ——
+ * 否则后期加云端退路就要改协议形状（对外契约版本递增）。
+ * ⚠️ v1 **只实现 `error`**；`cloud` 是枚举里的**预留成员**，不是实现 ——
+ * 配了 `cloud` 必须**明确报错**，不能悄悄按 `error` 执行（悄悄降级会让用户以为还在本地跑）。
+ */
+export type DegradationPolicy = "error" | "cloud";
+
+/** 降级策略的取值集合（默认 `error`）。 */
+export const DEGRADATION_POLICIES: readonly DegradationPolicy[] = ["error", "cloud"];
+
+/** 默认降级策略：用户没配时的取值。 */
+export const DEFAULT_DEGRADATION_POLICY: DegradationPolicy = "error";
+
+/**
+ * 未安装本地解析引擎时的装法（用户自己装，ZCode 不代装 —— 见 capability-provisioning.md §4 的 D5）。
+ *
+ * ⚠️ 定义在 contracts 是因为**两个包都要用**：adapter 用它填 `doctor` 报告的 `fix`，
+ * core 的就绪投影用它兜底（core 不许 import adapters）。
+ */
+export const MINERU_INSTALL_HINT = 'uv tool install --python 3.12 "mineru>=4.0,<5"';
+
+/**
  * 内部错误码（本地基础设施层内部流转）。对外归一由能力层做。
  * ⚠️ 用 `process_failed` 而不是 `engine_failed`——tesseract 路线已有的就是
  * `process_failed`，两个名字指同一件事会让按 `details.engineCode` 分支的业务方漏掉一侧。

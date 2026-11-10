@@ -38,6 +38,7 @@ import type {
   ModelUsage,
   OffPeakPort,
   TopicResourcePort,
+  LocalInfraPort,
   PdfDocumentPort,
   PermissionBrokerPort,
   PluginLoadOutcome,
@@ -213,6 +214,8 @@ export interface ZCodeAppOptions {
   httpClientPort?: HttpClientPort;
   imageProcessorPort?: ImageProcessorPort;
   pdfDocumentPort?: PdfDocumentPort;
+  /** 本地解析基础设施端口（能力供给层）；缺省由 app 自建。 */
+  localInfraPort?: LocalInfraPort;
   /** CLI 无头注入的全局 PDF 密码（--pdf-password）；透传 AgentRuntimeDeps.pdfPassword。 */
   pdfPassword?: string;
   artifactStore?: ToolArtifactStorePort;

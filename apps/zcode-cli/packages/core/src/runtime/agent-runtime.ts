@@ -12,6 +12,7 @@ import {
   createRootTraceContext,
   createToolRegistry,
   defaultPermissionConfig,
+  DEFAULT_DEGRADATION_POLICY,
   EventReducer,
   MessageHistoryImpl,
   PermissionService,
@@ -47,6 +48,8 @@ import type {
   FileSystemPort,
   ImageProcessorPort,
   LiveCapturePort,
+  LocalInfraPort,
+  DegradationPolicy,
   PdfDocumentPort,
   VideoFramePort,
   WorkspaceResourceIndexPort,
@@ -100,6 +103,7 @@ import type {
   RuntimeBackgroundStopResult,
 } from "./methods/background.js";
 import { initializeRuntimeTooling } from "./helpers/runtime-tools.js";
+import type { LocalInfraReadinessCache } from "./helpers/capability-provisioning/index.js";
 import { PdfPasswordCache } from "./helpers/pdf-password-cache.js";
 import { createPasswordAwarePdfDocumentPort } from "./helpers/pdf-password-port.js";
 import { requestPdfPasswordViaAskUserQuestion } from "./methods/pdf-password-prompt.js";
@@ -247,6 +251,12 @@ export class AgentRuntime {
   private fileSystemPort?: FileSystemPort;
   private imageProcessorPort?: ImageProcessorPort;
   private pdfDocumentPort?: PdfDocumentPort;
+  /** 本地基础设施端口（能力供给层消费；缺席即不做能力供给）。 */
+  private localInfraPort?: LocalInfraPort;
+  /** 能力不可用时的降级策略（默认 `error`）。 */
+  private localInfraDegradation: DegradationPolicy = DEFAULT_DEGRADATION_POLICY;
+  /** 能力供给层的就绪状态缓存（同一轮任务内只探测一次；跨轮不缓存）。 */
+  private localInfraReadinessCache: LocalInfraReadinessCache = {};
   private workspaceResourceIndexPort?: WorkspaceResourceIndexPort;
   private liveCapturePort?: LiveCapturePort;
   private videoFramePort?: VideoFramePort;
@@ -397,6 +407,10 @@ export class AgentRuntime {
         })
       : undefined;
     this.workspaceResourceIndexPort = deps.workspaceResourceIndexPort;
+    // 能力供给层：本地基础设施端口与降级策略（capability-provisioning.md §8.3）。
+    // 端口缺席 ⇒ 附件链不做能力供给（既有行为不变）。
+    this.localInfraPort = deps.localInfraPort;
+    this.localInfraDegradation = deps.localInfraDegradation ?? DEFAULT_DEGRADATION_POLICY;
     this.liveCapturePort = deps.liveCapturePort;
     this.videoFramePort = deps.videoFramePort;
     this.subagentPort = deps.subagentPort ?? runtime.createDefaultSubagentPort(deps);

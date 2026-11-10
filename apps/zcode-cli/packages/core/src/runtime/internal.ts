@@ -1,5 +1,6 @@
 import { PermissionService, ToolScheduler } from "./deps.js";
 import type { ModelRequestSessionFeature } from "@zcode/contracts";
+import type { LocalInfraReadinessCache } from "./helpers/capability-provisioning/index.js";
 import type {
   Logger,
   ModelSelection,
@@ -7,6 +8,8 @@ import type {
   MessageId,
   TurnId,
   ModelToolContract,
+  DegradationPolicy,
+  LocalInfraPort,
   PermissionBrokerPort,
   SessionEventSink,
   SessionEventStorePort,
@@ -152,6 +155,12 @@ export interface AgentRuntimeInternal
   fileSystemPort?: FileSystemPort;
   imageProcessorPort?: ImageProcessorPort;
   pdfDocumentPort?: PdfDocumentPort;
+  /** 本地基础设施端口（能力供给层消费；缺席即不做能力供给）。 */
+  localInfraPort?: LocalInfraPort;
+  /** 能力不可用时的降级策略（默认 `error`）。 */
+  localInfraDegradation: DegradationPolicy;
+  /** 能力供给层的就绪状态缓存（同一轮任务内只探测一次；跨轮不缓存）。 */
+  localInfraReadinessCache: LocalInfraReadinessCache;
   /** PDF 解锁密码内存缓存（密码统一通道唯一所有者，生命周期 = runtime，从不落盘）。 */
   pdfPasswordCache: PdfPasswordCache;
   /** PDF 分页阅读进度（read-pdf.ts 唯一写入者，跨 Read 调用累计）。 */
