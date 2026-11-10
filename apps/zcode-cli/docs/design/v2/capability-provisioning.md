@@ -243,6 +243,8 @@ export type DegradationPolicy =
 
 ⚠️ **v1 只支持本地路径 PDF**：inline PDF（粘贴 / data URL）要先经 `artifactStore.ensureMediaAttachmentPath` 物化出可解析路径（现成做法见 `inline-media-resolver.ts:252`），而 inline 的产物落点还要另定 ⇒ **v1 不做**（D11，见 §12 的 O7）。
 
+⚠️ **自动路线继承「绝不构造远程旗标」的红线**（local-infra §6）：`zcode ocr` 命令面不暴露 `--remote` / `--remote-url` / `--api-key`，实现里也**不构造**它们 —— 本 spec 的自动路线走的是同一个 `LocalInfraPort.parse`，**红线同样适用**：用户不敲命令，但文档照样不出机器。回归断言在 `packages/adapters/tests/local-infra/local-infra.test.ts`（体检与解析的 argv 里不出现远程旗标、不注入凭据环境变量）。
+
 ### 8.4 判定结果的可解释输出
 
 判定与供给的结果要能产出一行用户可见的话术（§7.3），形状：

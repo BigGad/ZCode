@@ -334,6 +334,30 @@ describe("本地基础设施端口 —— parse", () => {
     expect(argvOf(parseCall!)[1]).toBe(input);
   });
 
+  it("红线：体检与解析的 argv 里绝不出现远程参数，也不注入凭据环境变量", async () => {
+    // ⚠️ **产品红线**（local-infra §6）：ZCode 绝不构造 `--remote` / `--remote-url` /
+    // `--api-key` —— 远程解析会把文档送出本机。这条断言盯住两条路：
+    // **远程开关在 argv 上，凭据在 env.set 上**。体检与解析都过一遍。
+    const harness = await createHarness({ parseZip: () => buildZip(mineruArtifacts("basic")) });
+    const input = join(harness.root, "input.pdf");
+    await writeFile(input, "%PDF-1.7");
+
+    await harness.port.doctor();
+    await harness.port.parse({ path: input });
+
+    expect(harness.execution.calls.length).toBeGreaterThan(0);
+    for (const call of harness.execution.calls) {
+      const args = argvOf(call);
+      for (const forbidden of ["--remote", "--remote-url", "--api-key"]) {
+        expect(args).not.toContain(forbidden);
+      }
+      // 也不能用 `--api-key=<值>` 这类写法把凭据塞进 argv。
+      expect(args.some((arg) => /(api[-_]?key|token|secret)[=/]/iu.test(arg))).toBe(false);
+      // 环境只允许「剥离代理变量」，不允许注入任何变量（凭据也不例外）。
+      expect(call.env?.set).toBeUndefined();
+    }
+  });
+
   it("A10: 引擎 stdout 原样透出，供命令面当进度信息写 stderr", async () => {
     const harness = await createHarness({ parseZip: () => buildZip(mineruArtifacts("basic")) });
     const input = join(harness.root, "input.pdf");
