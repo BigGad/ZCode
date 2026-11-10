@@ -370,6 +370,26 @@ describe("能力供给层：附件链（A2–A6）", () => {
     expect(variants.map((variant) => variant.kind)).toContain("ocr");
   });
 
+  it("引擎告警要透出到可见文本（档位降级不能只留在 stderr）", async () => {
+    // ⚠️ local-infra 把「档位降到 ceiling」定义为**告知**（不是日志）——
+    // 自动路线没人看 stderr，吞掉就等于没告知。
+    const { port } = fakeLocalInfraPort({
+      parseResult: {
+        ok: true,
+        engine: "mineru",
+        tier: "basic",
+        output: { outputDir: SESSION_ARTIFACT_DIR, markdownPath: MARKDOWN_PATH },
+        warnings: ["档位 standard 在本机不可用（无加速器），已用 basic"],
+        durationMs: 1200,
+      },
+    });
+    const { resolved } = await resolvePdf({ localInfra: localInfra({ port }) });
+
+    const text = (resolved?.contentBlock as { text: string }).text;
+    expect(text).toContain("[Engine warnings:");
+    expect(text).toContain("已用 basic");
+  });
+
   it("A3：本地不可用 ⇒ 明确报错 + 确切安装命令", async () => {
     const { port, parse } = fakeLocalInfraPort({ report: unavailableReport() });
     const { resolved } = await resolvePdf({ localInfra: localInfra({ port }) });

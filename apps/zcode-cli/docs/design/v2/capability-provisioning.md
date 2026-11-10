@@ -274,6 +274,8 @@ export interface ProvisioningDecision {
 
 ⚠️ **每条报错都带规则 id**（`(rule: rule-9)` 这样的形状）—— 用户答疑、逐行回归测试都依赖它。
 
+⚠️ **成功路径也要透出引擎告警**（`[Engine warnings: …]` 一行，放在说明行之后、正文之前）：local-infra 把「档位降到 ceiling」「取不到页数」定义为**告知**而不是日志（§7 的档位降级行、`warnings[]` 语义）—— 自动路线**没人看 stderr**，吞掉就等于没告知。
+
 ## 9. 状态所有者与事件顺序
 
 ### 9.1 状态所有者

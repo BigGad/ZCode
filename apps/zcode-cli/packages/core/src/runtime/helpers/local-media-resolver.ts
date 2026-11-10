@@ -284,6 +284,9 @@ async function resolveLocalPdfByOcr(
     filename,
     markdown: outcome.markdown,
     ...(outcome.tier !== undefined ? { tier: outcome.tier } : {}),
+    // ⚠️ 引擎告警必须透出（local-infra：档位降到 ceiling 是「告知」而不是日志）——
+    // 自动路线没人看 stderr，吞掉就等于没告知。
+    warnings: outcome.warnings,
   });
   return resolvedOcrTextAttachment(context, {
     text,

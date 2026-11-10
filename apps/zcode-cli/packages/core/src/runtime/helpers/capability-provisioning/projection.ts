@@ -15,10 +15,14 @@ export function buildLocalOcrText(input: {
   readonly filename: string;
   readonly markdown: string;
   readonly tier?: MineruTier;
+  /** 引擎告警（档位被降到 ceiling、取不到页数等）—— local-infra 要求「告知」，不能吞。 */
+  readonly warnings?: readonly string[];
 }): string {
   const tier = input.tier !== undefined ? ` (tier ${input.tier})` : "";
+  const warnings = (input.warnings ?? []).filter((warning) => warning.trim() !== "");
   return [
     `[Attachment parsed by the local OCR engine${tier} because the selected model supports neither image nor PDF input. Source: ${input.filename}]`,
+    ...(warnings.length > 0 ? [`[Engine warnings: ${warnings.join("; ")}]`] : []),
     input.markdown,
   ].join("\n");
 }
