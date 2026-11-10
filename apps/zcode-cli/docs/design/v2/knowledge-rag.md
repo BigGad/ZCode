@@ -877,7 +877,7 @@ parseArgs({ args: ["knowledge", "index", "--path", "/tmp"], options: {}, allowPo
 | 命令面 | 错误形态 | 归属 |
 | --- | --- | --- |
 | `zcode cap run` | `CapabilityErrorCode`（8 值闭集） | [`capability-registry.md`](./capability-registry.md) §3 / §7 |
-| `zcode-infr-manage asset` | `LocalAssetErrorCode` | [`model-assets.md`](./model-assets.md) §4 / §12 |
+| `zcode asset` | `LocalAssetErrorCode` | [`model-assets.md`](./model-assets.md) §4 / §12 |
 | `zcode knowledge` | **本表的 `knowledge_*` 码** | 本 spec §12 |
 | `zcode standards validate` | **无结构化错误码**，只有退出码 `0/1/2` | [`standard-rule-engine.md`](./standard-rule-engine.md) §7.1 |
 

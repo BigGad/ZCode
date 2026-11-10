@@ -15,7 +15,7 @@
 | 能力 | spec | 状态 |
 | --- | --- | --- |
 | 本地 OCR | [`ocr-local.md`](./ocr-local.md) | 本轮写 spec（含图像预处理：倾斜校正 / 去噪 / 去阴影 / 去色彩 / 二值化；默认只做倾斜校正，其余四步保留在契约里但不启用） |
-| 本地资产（模型 / 语言包）管理 | [`model-assets.md`](./model-assets.md) | 本轮写 spec（ZCode 托管语言包；`zcode-infr-manage asset` 命令组；**不是能力**，见下） |
+| 本地资产（模型 / 语言包）管理 | [`model-assets.md`](./model-assets.md) | 本轮写 spec（ZCode 托管语言包；`zcode asset` 命令组；**不是能力**，见下） |
 | 客户端本地知识库（Runtime 内置 RAG） | [`knowledge-rag.md`](./knowledge-rag.md) | 本轮写 spec |
 | 统一规范规则引擎 | [`standard-rule-engine.md`](./standard-rule-engine.md) | 本轮写 spec |
 | 文档解析 | 已有 `office-runtime`（`packages/office-runtime`） | 无需新 spec |
@@ -26,9 +26,9 @@
 
 ⚠️ **知识检索不是能力键，是 runtime 子系统**。按用户定的方向（客户端本地优先、服务端只是补充），本地知识库住在 ZCode runtime 里、由 runtime 每轮自动消费（`relevant_knowledge` 注入 + `KnowledgeSearch` 工具），它**不进**本注册表、**不投影**成 `zcode cap run knowledge.search`。它的离线动作（建索引 / 查索引）以 `zcode knowledge index|search` 子命令单独暴露——理由见 [`knowledge-rag.md`](./knowledge-rag.md) §17。
 
-⚠️ **本地资产管理同样不是能力**。语言包 / 模型权重的下载、校验、切换（[`model-assets.md`](./model-assets.md)）**不进**本注册表、**不做**三投影 —— 它的使用者是人和运维，不是 agent，所以只有 `zcode-infr-manage asset ...` 一条 CLI 表面。这与知识检索「不投影成能力」是同一类判断，但理由不同：知识检索是 runtime 子系统，资产管理是**基础设施**。
+⚠️ **本地资产管理同样不是能力**。语言包 / 模型权重的下载、校验、切换（[`model-assets.md`](./model-assets.md)）**不进**本注册表、**不做**三投影 —— 它的使用者是人和运维，不是 agent，所以只有 `zcode asset ...` 一条 CLI 表面。这与知识检索「不投影成能力」是同一类判断，但理由不同：知识检索是 runtime 子系统，资产管理是**基础设施**。
 
-⚠️ **本地资产命令面已并入 `zcode-infr-manage`**（见 [`local-infra.md`](./local-infra.md) §7.3）—— 「基础设施」的两面（静态资产 + 动态引擎）由同一个二进制承载。资产层的规格仍在 [`model-assets.md`](./model-assets.md)，只是前缀变了。
+⚠️ **本地资产命令面是平级的 `zcode asset`**，与 `zcode ocr` 并列、**不嵌套在其下**（见 [`local-infra.md`](./local-infra.md) §7.3）—— CLI 原子化：一个能力域一个命令组；资产跨能力域共享，不该挂在 OCR 之下。资产层的规格仍在 [`model-assets.md`](./model-assets.md)。
 
 **不适用**
 
@@ -539,7 +539,7 @@ CLI 投影把 `error` 写 stderr 一行（`--json` 时同时进 stdout 的 JSON 
 | `engine_not_found` | `invalid_input` | `details.engineCode`（指定的引擎 / **档位不在官方枚举内**） |
 | `input_invalid` | `not_found`（文件不存在） / `unsupported_input`（类型不支持） | `details.engineCode` —— ⚠️ **二选一的规则必须写死**，否则实现者各写各的 |
 | `artifact_missing` | `internal` | `details.engineCode` —— ⚠️ **退出码 0 但产物缺失 ≠ 成功** |
-| `language_missing` | `unavailable` | `details.missingLanguages` + `hint`（`zcode-infr-manage asset install tessdata-zh-en`） |
+| `language_missing` | `unavailable` | `details.missingLanguages` + `hint`（`zcode asset install tessdata-zh-en`） |
 | 资产 `not_found` / 资产未安装 / 未激活 | `unavailable` | `details.assetCode` + `details.group` |
 | `password_protected` | `invalid_input` | `hint`（加密 PDF 的说明） |
 | `corrupted` | `invalid_input` | `details.engineCode` / `details.assetCode` |
@@ -547,7 +547,7 @@ CLI 投影把 `error` 写 stderr 一行（`--json` 时同时进 stdout 的 JSON 
 | `unsupported_input` | `unsupported_input` | — |
 | `timeout` / `cancelled` | 同名 | — |
 
-⚠️ **归一方向是单向的：底层 → 能力码**。不是「CLI 层把能力码映射成资产码」。资产层自己的 `LocalAssetErrorCode`（见 [`model-assets.md`](./model-assets.md) §12）**只存在于 `zcode-infr-manage asset` 命令面**，不进能力信封。
+⚠️ **归一方向是单向的：底层 → 能力码**。不是「CLI 层把能力码映射成资产码」。资产层自己的 `LocalAssetErrorCode`（见 [`model-assets.md`](./model-assets.md) §12）**只存在于 `zcode asset` 命令面**，不进能力信封。
 
 ⚠️ **明确的例外**：`zcode standards validate` 的退出码是 `0 / 1 / 2`（`2` = 文件读不到 / 非法 JSON），**不与本表同源**。该命令面**不注册**为能力键（见 §10 与 §11）—— 这是一个有意的例外，不是遗漏。
 

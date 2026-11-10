@@ -813,8 +813,8 @@ adapters/ocr/sidecar-store.ts   ← 唯一的 sidecar 写入点（FileSystemPort
 | 情形 | 引擎层码 | **对外 `error.code`** | CLI 退出码 | 说明 |
 | --- | --- | --- | --- | --- |
 | tesseract 不可用（没装 / 不在 PATH / `--engine` 指错） | `engine_unavailable` | `unavailable` | `1` | `hint` 给装法：`brew install tesseract` / `apt install tesseract-ocr`；`details.engineCode = "engine_unavailable"` |
-| 语言资产缺失（要 chi_sim 但只有 eng） | `language_missing` | `unavailable` | `1` | **语言资产由 ZCode 托管**（[`model-assets.md`](./model-assets.md)）→ 提示 `zcode-infr-manage asset install tessdata-zh-en`，不再让用户去装 tessdata-lang；`details.missingLanguages` |
-| **语言资产组未安装 / 未激活** | 资产层 `not_found` | `unavailable` | `1` | 同样指向 `zcode-infr-manage asset`；`details.assetCode` / `details.group` |
+| 语言资产缺失（要 chi_sim 但只有 eng） | `language_missing` | `unavailable` | `1` | **语言资产由 ZCode 托管**（[`model-assets.md`](./model-assets.md)）→ 提示 `zcode asset install tessdata-zh-en`，不再让用户去装 tessdata-lang；`details.missingLanguages` |
+| **语言资产组未安装 / 未激活** | 资产层 `not_found` | `unavailable` | `1` | 同样指向 `zcode asset`；`details.assetCode` / `details.group` |
 | **TSV 产物缺失但退出码为 0** | `process_failed` | `internal` | `1` | 回归 §2 的「缺 `configs/` → 静默失败」坑 → adapter 必须**专门断言 `<outbase>.tsv` 存在且非空**（tesseract 会退回写出 `.txt`，只查「有文件」会误判成功） |
 | 引擎在但 `probe` 返回可用，跑起来却失败 | `process_failed` | `internal` | `1` | `details.engineCode` + stderr 尾（**不含路径里的凭据**，本命令无凭据） |
 | 输入不是 PDF / 图片 | `unsupported_input` | `unsupported_input` | `1` | |

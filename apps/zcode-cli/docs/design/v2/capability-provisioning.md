@@ -8,7 +8,7 @@ Status: **规格草案**（2026-11-11）：决策已定，分三步实施；**�
 | --- | --- | --- |
 | 本 spec | `apps/zcode-cli/docs/design/v2/capability-provisioning.md` | ✅ 已写（草案） |
 | 供给层实现 | `apps/zcode-cli/packages/core/src/runtime/helpers/capability-provisioning/` | ❌ 未写（第 1 步） |
-| `LocalInfraPort` 的装配 | `packages/bootstrap/src/app/port-wiring.ts` | ❌ 未装（v1 只在独立的 `zcode-infr-manage` 入口里用） |
+| `LocalInfraPort` 的装配 | `packages/bootstrap/src/app/port-wiring.ts` | ❌ 未装（当前只在 `zcode ocr` 命令组里用；第 1 步要装进 runtime 依赖） |
 | 降级策略配置键 | `adapters/src/config/schema.ts` 的 `ocrConfigSchema` | ❌ 未加 `degradation` |
 | 产物 variant kind | `contracts` 的 `WorkspaceResourceVariant.kind` | ❌ 未加 `ocr` |
 
@@ -18,7 +18,7 @@ Status: **规格草案**（2026-11-11）：决策已定，分三步实施；**�
 
 **一句话：让 ZCode 在任务需要时，自己把底层能力（当前是本地 OCR）拉起来 / 备好，用户不感知命令。**
 
-- **触发点**：任务加载 / 附件解析阶段 —— 不是用户手动敲 `zcode-infr-manage`。
+- **触发点**：任务加载 / 附件解析阶段 —— 不是用户手动敲 `zcode ocr`。
 - **供给对象**：**能力可用性**，不是「模型环境」（§2 的 D1）。
 - **v1（第 1 步）范围**：本地 MinerU **已就位**时自动用；不就位时给**确定的下一步**（装什么 / 下什么）。
 - **v1 不做**：自动安装引擎二进制；自动下载权重（第 2 步）；退云端（第 3 步，默认关）。
@@ -42,6 +42,9 @@ Status: **规格草案**（2026-11-11）：决策已定，分三步实施；**�
 | D6 | 将来退到云端**必须显式授权** —— 文档会离开机器，这与 [`local-infra.md`](./local-infra.md)「绝不构造 `--remote` / `--api-key`」是同一条红线，只是发生在 provider 层。 |
 | D7 | **判定规则不由模型决定** —— 沿用现有纪律：策略判定归 `resource-policy`，不让模型自己声明「我需要 OCR」。 |
 | D8 | **ZCode 自动起 OCR**：用户不感知命令，本地引擎由 ZCode 自己拉起。 |
+| D9 | **产物落 workspace 的 artifact 目录**：本地 OCR 的产物**不落在用户源文件旁**，落在会话级的 workspace artifact 目录（随会话产物一起清理）。 |
+| D10 | **产物登记用新的 `ocr` variant kind**：在 workspace 资源索引里，OCR 产物是**独立的一种变体**，不复用 `transcript` / `original`。 |
+| D11 | **inline PDF 不在 v1**：粘贴 / data URL 的 PDF 本轮不接本地 OCR（要先把 inline 产物的落点另定，见 O7）。 |
 
 ⚠️ **D3 与 D4 是为了让「后期可能都需要」变便宜。** 如果 v1 把「本地 / 云端」写成两个并列分支、或者把「不降级」写成「代码里压根没有那条路」，后期加云端退路就是改协议形状（对外契约要版本递增）；写成枚举成员则只是加一个值。
 
@@ -60,7 +63,7 @@ Status: **规格草案**（2026-11-11）：决策已定，分三步实施；**�
 
 ⚠️ **就绪状态不得跨进程缓存**（沿用 `local-infra.md` §6.1「引擎定位每次现查，环境会变」）。可在**单次任务内**缓存，避免同一轮里重复探测。
 
-⚠️ **名字撞车提醒**：`zcode doctor`（`cli/src/run.ts:251`）查的是 **CLI 自身的运行时信息**（版本 / 平台 / SEA / 打包形态），与 `zcode-infr-manage doctor`（**引擎环境体检**，local-infra §5.4）**是两个不同的命令**。本 spec 的「就绪状态」来自后者 —— 别把两者混成一件事，也别让本层复用 `zcode doctor` 的名字。
+⚠️ **名字撞车提醒**：`zcode doctor`（`cli/src/run.ts:251`）查的是 **CLI 自身的运行时信息**（版本 / 平台 / SEA / 打包形态），与 `zcode ocr doctor`（**引擎环境体检**，local-infra §5.4）**是两个不同的命令**。本 spec 的「就绪状态」来自后者 —— 别把两者混成一件事，也别让本层复用 `zcode doctor` 的名字。
 
 ## 4. 三层就绪与「不就位」的两种性质
 
@@ -77,7 +80,7 @@ Status: **规格草案**（2026-11-11）：决策已定，分三步实施；**�
 - **不可用** = ZCode 没资格自作主张（要往用户机器上装别人的可执行文件）→ 沿用既有报错路径，但要把「装什么、怎么装」说死；
 - **未就位** = ZCode 托管资产的本分（`model-assets.md` §1「模型与语言包由 ZCode 托管」）→ 由 ZCode 备（第 2 步）。
 
-⚠️ **v1 只做到「不可用时把下一步说清楚」**：第 ③ 层虽然已能判定，但自动下载被 asset 组的 7 条待决卡住（最关键是目录地址只有占位 URL —— [`local-infra.md`](./local-infra.md) §7.3），所以 v1 给的是**确切命令**（`zcode-infr-manage models download --tier <t>`），不是自动下载。
+⚠️ **v1 只做到「不可用时把下一步说清楚」**：第 ③ 层虽然已能判定，但自动下载被 asset 组的 7 条待决卡住（最关键是目录地址只有占位 URL —— [`local-infra.md`](./local-infra.md) §7.3），所以 v1 给的是**确切命令**（`zcode ocr models download --tier <t>`），不是自动下载。
 
 ## 5. 三步路线
 
@@ -85,11 +88,11 @@ Status: **规格草案**（2026-11-11）：决策已定，分三步实施；**�
 
 | 步 | 交付 | 依赖 | 兑现的产品承诺 |
 | --- | --- | --- | --- |
-| **1** | 就绪状态**可查询** + 附件链自动判定 + **本地已就位则自动用** | 无（复用现有 `LocalInfraPort` 与已实现的 `zcode-infr-manage models download`） | D8「ZCode 自己起 OCR，用户不感知命令」 |
+| **1** | 就绪状态**可查询** + 附件链自动判定 + **本地已就位则自动用** | 无（复用现有 `LocalInfraPort` 与已实现的 `zcode ocr models download`） | D8「ZCode 自己起 OCR，用户不感知命令」 |
 | **2** | 未就位时**自动备资产** | asset 组的 7 条待决解掉（[`local-infra.md`](./local-infra.md) §7.3） | 「开箱可用」真正兑现 |
 | **3** | 本地失败**退云端** | 上面 + provider 选择 + 授权交互 | 体验连续（**默认关**，见 D6） |
 
-⚠️ **第 1 步不需要等资产层**：用户自己跑一次 `zcode-infr-manage models download --tier basic`（这条命令上一轮已实现并实测过）就满足第 ③ 层，ZCode 随即能用。这是「按需供给」里**不依赖任何未决决策**的那一段，也是最该先落地的一段。
+⚠️ **第 1 步不需要等资产层**：用户自己跑一次 `zcode ocr models download --tier basic`（这条命令上一轮已实现并实测过）就满足第 ③ 层，ZCode 随即能用。这是「按需供给」里**不依赖任何未决决策**的那一段，也是最该先落地的一段。
 
 ⚠️ **第 1 步与第 2 步的差别只在「谁来按下下载键」**：ZCode 代按（自动）还是用户自己按（给命令）。判定与就绪状态的代码**完全共用**，所以第 1 步的实现不会因为第 2 步延期而返工。
 
@@ -220,11 +223,11 @@ export type DegradationPolicy =
 | **附件解析传参** | `core/src/runtime/methods/turn.ts:632-650` 的 `resolveTurnAttachments` | 新增 `localInfra` 选项（`modelInputFormat` 已在传） |
 | **PDF 分支** | `core/src/runtime/helpers/local-media-resolver.ts:91` 的 `resolveLocalPdfAttachment` | 在「页图渲染不可用」与「回落 file block」之间插入本地 OCR 分支 |
 | **配置键** | `adapters/src/config/schema.ts:52` 的 `ocrConfigSchema` | 新增 `degradation: z.enum(["error", "cloud"]).optional()`（默认 `error`）—— ⚠️ `cloud` 在 v1 **未实现**，配了要明确报错（验收 A7） |
-| **产物登记** | `contracts` 的 `WorkspaceResourceVariant.kind`（现为 `original \| transcript \| frame \| thumbnail \| waveform` 闭集） | ⚠️ **建议新增 `ocr` kind**（对外契约变更，见 §11） |
+| **产物登记** | `contracts` 的 `WorkspaceResourceVariant.kind`（现为 `original \| transcript \| frame \| thumbnail \| waveform` 闭集） | ✅ **新增 `ocr` kind**（D10；对外契约变更，见 §11） |
 
-⚠️ **产物落盘位置必须覆盖**：local-infra 默认落 `<源文件目录>/<源文件名>.mineru/`（§5.5），那是**用户文件旁** —— 附件解析发生在会话里，往那儿写会污染用户目录。⇒ **供给层必须显式传 `outputDir`** 到 workspace 内的 artifact 目录（与附件物化产物同处）。这与 local-infra §6.1「调用方只提供 `outputDir`」一致，不越权。
+⚠️ **产物落盘位置必须覆盖**：local-infra 默认落 `<源文件目录>/<源文件名>.mineru/`（§5.5），那是**用户文件旁** —— 附件解析发生在会话里，往那儿写会污染用户目录。⇒ **供给层必须显式传 `outputDir`** 到 **workspace 的 artifact 目录**（D9；会话级 —— `NodeToolArtifactStore` 的根是 `<storageRoot>/cli/artifacts/<sessionId>/`，与附件物化产物同处、随会话一起清理）。这与 local-infra §6.1「调用方只提供 `outputDir`」一致，不越权。
 
-⚠️ **v1 只支持本地路径 PDF**：inline PDF（粘贴 / data URL）要先经 `artifactStore.ensureMediaAttachmentPath` 物化出可解析路径（现成做法见 `inline-media-resolver.ts:252`），而 inline 的产物落点还要另定 ⇒ v1 不做，列为 §12 的 O7。
+⚠️ **v1 只支持本地路径 PDF**：inline PDF（粘贴 / data URL）要先经 `artifactStore.ensureMediaAttachmentPath` 物化出可解析路径（现成做法见 `inline-media-resolver.ts:252`），而 inline 的产物落点还要另定 ⇒ **v1 不做**（D11，见 §12 的 O7）。
 
 ### 8.4 判定结果的可解释输出
 
@@ -337,6 +340,6 @@ export interface ProvisioningDecision {
 | O4 | **退云端的授权形态**：一次性询问 / 配置项 / 每次任务 | D6 的落地形态 | 待定（第 3 步） |
 | O5 | 能力键与本层的边界 | —— | ✅ **已定**：本层叫 readiness / provisioning，不叫 capability（§8.1） |
 | O6 | **就绪状态在多窗口 / 多 workspace 下的共享** | 就绪是机器级的，但探测有成本；多窗口各探一次浪费 | 待定（§9.1）—— v1 先「每任务一次」，跨任务不缓存 |
-| O7 | **inline PDF（粘贴 / data URL）也要能走本地 OCR** | 需先物化路径 + 定 inline 产物的落点 | 待定（§8.3，v1 不做） |
+| O7 | **inline PDF（粘贴 / data URL）也要能走本地 OCR** | 需先物化路径 + 定 inline 产物的落点 | ✅ **已定（2026-11-11，用户确认）**：**v1 不做 inline PDF**（D11）。落地 inline 时还要另定 inline 产物的落点，不能直接套 D9 的会话级 artifact 目录 |
 | O8 | **`doctor()` 的探测成本是否可接受**（每次会 spawn `hardware detect` + `models show`） | 太慢就要拆一个只查 ①②③ 的 `readiness()` 端口方法（会改 local-infra 契约） | ⚠️ **待实测**（第 1 步落地时量一次） |
-| O9 | **就绪状态的产物登记 kind**：`ocr` 是新增 kind，还是复用 `transcript` | 对外契约变更的幅度 | 待定（§8.3） |
+| O9 | **就绪状态的产物登记 kind**：`ocr` 是新增 kind，还是复用 `transcript` | 对外契约变更的幅度 | ✅ **已定（2026-11-11，用户确认）**：**新增 `ocr` kind**（D10），不复用 `transcript` |
