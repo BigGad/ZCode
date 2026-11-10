@@ -232,7 +232,7 @@ async function resolveLocalPdfByOcr(
     const failureDecision = {
       ...decision,
       route: "error" as const,
-      ruleId: "rule-9" as const,
+      ruleId: "rule-12" as const,
       reason: "无法解析会话级产物目录，本地 OCR 产物无处落盘。",
     };
     const text = buildLocalOcrFailureText({ filename, decision: failureDecision });
@@ -253,7 +253,20 @@ async function resolveLocalPdfByOcr(
   });
 
   if (!outcome.ok) {
-    const text = buildLocalOcrFailureText({ filename, decision, failure: outcome });
+    // ⚠️ **报错归到 rule-9**（spec §7.2 第 9 行「就绪但本次调用失败」）：
+    // 命中的判定是 rule-6（路由=本地引擎），但**这次的结果是调用失败** ⇒
+    // 用户可见的话术要按 rule-9 说，不能拿 rule-6 的「引擎已就绪，走本地 OCR」当理由。
+    const failureDecision = {
+      ...decision,
+      route: "error" as const,
+      ruleId: "rule-9" as const,
+      reason: "本地解析引擎已就绪，但本次解析调用失败。",
+    };
+    const text = buildLocalOcrFailureText({
+      filename,
+      decision: failureDecision,
+      failure: outcome,
+    });
     return resolvedOcrTextAttachment(context, {
       text,
       bytes: Buffer.byteLength(text, "utf8"),

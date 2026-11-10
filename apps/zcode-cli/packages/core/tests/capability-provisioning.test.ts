@@ -424,6 +424,35 @@ describe("能力供给层：附件链（A2–A6）", () => {
     expect(text).toContain("CUDA out of memory");
   });
 
+  it("A6 回归：引擎失败的话术不说「路线不可用」，并带 rule-9", async () => {
+    const { port } = fakeLocalInfraPort({
+      parseResult: {
+        ok: false,
+        error: { code: "process_failed", message: "本地解析引擎执行失败。" },
+        warnings: [],
+        durationMs: 30,
+      },
+    });
+    const { resolved } = await resolvePdf({ localInfra: localInfra({ port }) });
+
+    const text = (resolved?.contentBlock as { text: string }).text;
+    expect(text).toContain("the local OCR engine failed");
+    expect(text).toContain("(rule: rule-9)");
+    // ⚠️ 引擎明明就绪（rule-6 已判定），不能说「路线不可用」，也不该重复路由理由。
+    expect(text).not.toContain("the local OCR route is unavailable");
+    expect(text).not.toContain("走本地 OCR。");
+  });
+
+  it("路线不可用的报错带 rule-7 与确定的下一步（与引擎失败分开）", async () => {
+    const { port } = fakeLocalInfraPort({ report: unavailableReport() });
+    const { resolved } = await resolvePdf({ localInfra: localInfra({ port }) });
+
+    const text = (resolved?.contentBlock as { text: string }).text;
+    expect(text).toContain("the local OCR route is unavailable");
+    expect(text).toContain("(rule: rule-7)");
+    expect(text).toContain("Next step:");
+  });
+
   it("拿不到会话级产物目录 ⇒ 放弃本地路线并明确报错（不落在源文件旁）", async () => {
     const { port, parse } = fakeLocalInfraPort({});
     const { resolved } = await resolvePdf({
@@ -434,6 +463,7 @@ describe("能力供给层：附件链（A2–A6）", () => {
     expect(parse).not.toHaveBeenCalled();
     const text = (resolved?.contentBlock as { text: string }).text;
     expect(text).toContain("could not be parsed");
+    expect(text).toContain("(rule: rule-12)");
   });
 
   it("引擎失败 ⇒ 投递的文本与声明的字节数一致（不是 0）", async () => {

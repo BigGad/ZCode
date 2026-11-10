@@ -22,6 +22,10 @@ export type ProvisioningRoute =
  *
  * ⚠️ `rule-11` 不在 §7.2 的原始表里：它是「降级策略 `cloud` 在 v1 未实现」的显式拒绝，
  * 补进来是为了让**每一行判定都有 id**（可解释性依赖 id，见 §7.3）。
+ *
+ * ⚠️ `rule-9` / `rule-12` 是**运行时失败**的 id，不在判定表里：
+ * 判定（路由）已经命中了 rule-6，但**执行阶段**失败（引擎调用失败 / 拿不到产物目录）⇒
+ * 报错要按执行阶段的事实说，不能拿路由阶段的理由当理由。
  */
 export type ProvisioningRuleId =
   | "rule-1"
@@ -34,7 +38,8 @@ export type ProvisioningRuleId =
   | "rule-8"
   | "rule-9"
   | "rule-10"
-  | "rule-11";
+  | "rule-11"
+  | "rule-12";
 
 /** 规则表的输入维度：附件种类。 */
 export type ProvisioningAttachmentKind = "text" | "image" | "pdf";
