@@ -203,7 +203,7 @@ async function resolveLocalPdfByOcr(
   sizeBytes: number,
   sha256: string | undefined,
 ): Promise<ResolvedTurnAttachment | undefined> {
-  const { absolutePath, attachment, filename, options, source } = context;
+  const { absolutePath, filename, options } = context;
   const localInfra = options.localInfra;
   if (localInfra === undefined) return undefined;
 
@@ -227,7 +227,7 @@ async function resolveLocalPdfByOcr(
   }
 
   // 本地引擎路线：产物必须落**会话级 artifact 目录**（D9），不得落在用户源文件旁。
-  const outputDir = await resolveOcrOutputDir(options, context.index);
+  const outputDir = await resolveOcrOutputDir(options, context.index, sha256);
   if (outputDir === undefined) {
     const failureDecision = {
       ...decision,
@@ -253,9 +253,10 @@ async function resolveLocalPdfByOcr(
   });
 
   if (!outcome.ok) {
+    const text = buildLocalOcrFailureText({ filename, decision, failure: outcome });
     return resolvedOcrTextAttachment(context, {
-      text: buildLocalOcrFailureText({ filename, decision, failure: outcome }),
-      bytes: 0,
+      text,
+      bytes: Buffer.byteLength(text, "utf8"),
     });
   }
 
@@ -266,13 +267,14 @@ async function resolveLocalPdfByOcr(
     sha256,
   });
 
+  const text = buildLocalOcrText({
+    filename,
+    markdown: outcome.markdown,
+    ...(outcome.tier !== undefined ? { tier: outcome.tier } : {}),
+  });
   return resolvedOcrTextAttachment(context, {
-    text: buildLocalOcrText({
-      filename,
-      markdown: outcome.markdown,
-      ...(outcome.tier !== undefined ? { tier: outcome.tier } : {}),
-    }),
-    bytes: outcome.bytes,
+    text,
+    bytes: Buffer.byteLength(text, "utf8"),
   });
 }
 
@@ -286,14 +288,14 @@ async function resolveLocalPdfByOcr(
 async function resolveOcrOutputDir(
   options: LocalMediaResolverOptions,
   index: number,
+  sha256: string | undefined,
 ): Promise<string | undefined> {
   const resolveDir = options.artifactStore?.resolveSessionArtifactDir?.bind(options.artifactStore);
   if (resolveDir === undefined || options.sessionId === undefined) return undefined;
   try {
     const resolved = await resolveDir({
       sessionId: options.sessionId,
-      // 每个附件一个目录：引擎会清空目标目录（prepareOutputDir），共用会互相抹掉。
-      subdir: `ocr-${index}`,
+      subdir: ocrOutputSubdir(index, sha256),
     });
     return resolved?.path;
   } catch {
@@ -301,7 +303,30 @@ async function resolveOcrOutputDir(
   }
 }
 
-/** 本地 OCR 的文本附件（成功与失败都是「一段文字」形态）。 */
+/**
+ * OCR 产物目录名。
+ *
+ * ⚠️ **必须带内容指纹，不能只有附件下标**：下标只在**同一轮任务内**唯一。
+ * 同一会话的另一轮任务里，下标会重复（都是 0），文档却可能不同 ——
+ * 而引擎的 `prepareOutputDir` 是**先删再建**（local-infra §6.2）⇒ 共用目录会把
+ * 上一轮的产物**清空覆盖**，资源索引里已登记的 `ocr` 变体路径就指向了别人的内容。
+ *
+ * ⚠️ **用内容指纹而不是随机数**：同一份文档重复解析落在同一个目录，
+ * 产物天然幂等（引擎重写出同样的内容）；拿不到指纹时才退回随机后缀。
+ */
+function ocrOutputSubdir(index: number, sha256: string | undefined): string {
+  const fingerprint = sha256?.replace(/^sha256:/u, "").slice(0, 16);
+  const token =
+    fingerprint !== undefined && fingerprint.length > 0 ? fingerprint : crypto.randomUUID();
+  return `ocr-${index}-${token}`;
+}
+
+/**
+ * 本地 OCR 的文本附件（成功与失败都是「一段文字」形态）。
+ *
+ * ⚠️ **`bytes` 是「投递出去的内联文本」的字节数**（含前缀说明行），不是原始 PDF 的字节数，
+ * 也不是产物 markdown 文件的字节数 —— 产物文件的大小记在资源索引的 `ocr` 变体上。
+ */
 function resolvedOcrTextAttachment(
   context: LocalMediaContext,
   input: { readonly text: string; readonly bytes: number },

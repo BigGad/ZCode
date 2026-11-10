@@ -234,6 +234,10 @@ export type DegradationPolicy =
 
 ⚠️ **产物落盘位置必须覆盖**：local-infra 默认落 `<源文件目录>/<源文件名>.mineru/`（§5.5），那是**用户文件旁** —— 附件解析发生在会话里，往那儿写会污染用户目录。⇒ **供给层必须显式传 `outputDir`** 到 **workspace 的 artifact 目录**（D9；会话级 —— `NodeToolArtifactStore` 的根是 `<storageRoot>/cli/artifacts/<sessionId>/`，与附件物化产物同处、随会话一起清理）。这与 local-infra §6.1「调用方只提供 `outputDir`」一致，不越权。
 
+⚠️ **产物目录必须按内容隔离，不能只用附件下标**（2026-11-11 修复）：引擎的 `prepareOutputDir` 是**先删再建**（local-infra §6.2），而附件下标只在**同一轮任务内**唯一 —— 同一会话的另一轮任务里下标会重复（都是 0），文档却可能不同 ⇒ 共用目录会把上一轮的产物**清空覆盖**，资源索引里已登记的 `ocr` 变体路径就指向了别人的内容。
+
+⇒ 目录名形如 `ocr-<下标>-<内容指纹前 16 位>`（指纹取附件内容的 sha256；拿不到指纹时退回随机后缀）。**同一份文档重复解析落在同一目录**（幂等，引擎重写出同样内容），**不同文档绝不共用目录**。
+
 ⚠️ **v1 只支持本地路径 PDF**：inline PDF（粘贴 / data URL）要先经 `artifactStore.ensureMediaAttachmentPath` 物化出可解析路径（现成做法见 `inline-media-resolver.ts:252`），而 inline 的产物落点还要另定 ⇒ **v1 不做**（D11，见 §12 的 O7）。
 
 ### 8.4 判定结果的可解释输出
@@ -341,12 +345,15 @@ export interface ProvisioningDecision {
 | 附件解析（含真实 OCR 推理） | 9306ms |
 | `contentBlock` | `type: "text"`，正文为 `[Attachment parsed by the local OCR engine (tier standard) because the selected model supports neither image nor PDF input. Source: ocr-scanned.pdf]` + OCR markdown 全文 |
 | `mime` / `storageKind` / `recoverability` | `text/markdown` / `inline` / `provider_ready` |
-| 产物落点（D9） | `<artifacts>/<sessionId>/ocr-0/{markdown.md, middle_json.json, structured_content.json}` —— **不在用户源文件旁** |
-| 资源索引登记（D10） | 条目 `kind: pdf`，变体 `ocr`（`text/markdown`，指向 `ocr-0/markdown.md`）+ `original`（`application/pdf`，指向源文件） |
+| 产物落点（D9） | `<artifacts>/<sessionId>/ocr-0-<内容指纹>/{markdown.md, middle_json.json, structured_content.json}` —— **不在用户源文件旁** |
+| 资源索引登记（D10） | 条目 `kind: pdf`，变体 `ocr`（`text/markdown`，指向 `ocr-0-<指纹>/markdown.md`）+ `original`（`application/pdf`，指向源文件） |
+| 同一会话两份不同文档 | 两个**互不相同**的产物目录（`ocr-0-541f2444a3f53768` / `ocr-0-c25eea836b37143a`），两个索引条目各指自己的 `ocr` 变体 —— 互不覆盖（§8.3 的目录隔离规则） |
 
 ⚠️ **这次验证是手工脚本，不是自动化测试**：它依赖本机真装了 MinerU 与已下载的权重，进不了 CI。**回归仍在 core 的 hermetic 测试里**（用假端口覆盖 A1–A8）；本节留痕的是「真引擎 + 真产物 + 真索引」这条链确实跑通。
 
 ⚠️ **A5（有视觉能力时行为不变）这次没有真模型回归**：本机没有跑一次真实的视觉模型会话，该断言仍由 core 测试的假端口覆盖。
+
+⚠️ **实测遇到过一次引擎挂起**：同一份 PDF、同一台机器，前几次 8–12s 跑完，有一次 `mineru-kit parse` 进程 0% CPU 挂到 **10 分钟**（= local-infra §6.2 的 `PARSE_COLD_START_BUDGET_MS`）才被超时终止，随后按 A6 明确报错（不静默失败、不换路）。**挂起本身未能定位**（同命令单独跑正常，怀疑与 MPS 设备状态有关）—— 已知风险：引擎无响应时用户要等满 10 分钟才看到错误。超时阈值是 local-infra v1 的既有设计，本轮不动。
 
 ## 10. 验收场景
 

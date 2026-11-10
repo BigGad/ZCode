@@ -125,7 +125,7 @@ function fakeLocalInfraPort(input: {
   return { port, doctor, parse };
 }
 
-function fakeFileSystemPort(): FileSystemPort & {
+function fakeFileSystemPort(hash = "sha256:aaaa"): FileSystemPort & {
   readTextFile: ReturnType<typeof vi.fn>;
 } {
   const path = "/tmp/project/report.pdf";
@@ -141,7 +141,7 @@ function fakeFileSystemPort(): FileSystemPort & {
       content: PDF_BYTES,
       bytesRead: PDF_BYTES.byteLength,
       sizeBytes: PDF_BYTES.byteLength,
-      revision: { id: "rev", mtimeMs: 1, sizeBytes: PDF_BYTES.byteLength, hash: "hash" },
+      revision: { id: "rev", mtimeMs: 1, sizeBytes: PDF_BYTES.byteLength, hash },
     })),
     readTextFile: vi.fn(async () => ({
       path: MARKDOWN_PATH,
@@ -170,6 +170,29 @@ function fakeArtifactStore(dir: string | null = SESSION_ARTIFACT_DIR): {
 
 function fakeResourceIndexPort(): { upsert: ReturnType<typeof vi.fn> } {
   return { upsert: vi.fn(async () => undefined) };
+}
+
+/**
+ * 按子目录展开的产物仓库（模拟真实的 `<artifacts>/<sessionId>/<subdir>` 布局）。
+ *
+ * ⚠️ 引擎的 `prepareOutputDir` 是**先删再建** ⇒ 目录名撞车会把上一轮的产物清空。
+ */
+function subdirArtifactStore(): {
+  resolveSessionArtifactDir: ReturnType<typeof vi.fn>;
+  writeToolResultArtifact: ReturnType<typeof vi.fn>;
+} {
+  return {
+    resolveSessionArtifactDir: vi.fn(async (request: { subdir?: string }) => ({
+      path: `/tmp/artifacts/session-1/${request.subdir ?? ""}`,
+    })),
+    writeToolResultArtifact: vi.fn(async () => ({
+      uri: "zcode-artifact://local-ocr-test",
+      bytes: PDF_BYTES.byteLength,
+      contentType: "application/pdf",
+      createdAt: new Date(),
+      id: "local-ocr-test",
+    })),
+  };
 }
 
 function fakePdfDocumentPort(): PdfDocumentPort {
@@ -216,7 +239,8 @@ function localInfra(input: {
 async function resolvePdf(options: {
   localInfra?: LocalInfraProvisioning;
   modelInputFormat?: ModelInputFormat;
-  artifactStore?: ReturnType<typeof fakeArtifactStore>;
+  artifactStore?: ReturnType<typeof fakeArtifactStore> | ReturnType<typeof subdirArtifactStore>;
+  fileSystemPort?: ReturnType<typeof fakeFileSystemPort>;
   resourceIndexPort?: ReturnType<typeof fakeResourceIndexPort>;
   pdfDocumentPort?: PdfDocumentPort;
   imageProcessorPort?: ImageProcessorPort;
@@ -225,7 +249,7 @@ async function resolvePdf(options: {
   const resourceIndexPort = options.resourceIndexPort ?? fakeResourceIndexPort();
   const resolved = await resolveTurnAttachments([{ type: "pdf", path: "report.pdf" }], {
     artifactStore: artifactStore as never,
-    fileSystemPort: fakeFileSystemPort(),
+    fileSystemPort: options.fileSystemPort ?? fakeFileSystemPort(),
     modelInputFormat: options.modelInputFormat ?? noVisionFormat(),
     sessionId: createSessionId("local-ocr-session"),
     traceContext: { traceId: "trace_local_ocr" },
@@ -410,5 +434,60 @@ describe("能力供给层：附件链（A2–A6）", () => {
     expect(parse).not.toHaveBeenCalled();
     const text = (resolved?.contentBlock as { text: string }).text;
     expect(text).toContain("could not be parsed");
+  });
+
+  it("引擎失败 ⇒ 投递的文本与声明的字节数一致（不是 0）", async () => {
+    const { port } = fakeLocalInfraPort({
+      parseResult: {
+        ok: false,
+        error: { code: "process_failed", message: "本地解析引擎执行失败。" },
+        warnings: [],
+        durationMs: 30,
+      },
+    });
+    const { resolved } = await resolvePdf({ localInfra: localInfra({ port }) });
+
+    const text = (resolved?.contentBlock as { text: string }).text;
+    expect(text.length).toBeGreaterThan(0);
+    expect(resolved?.metadata?.sizeBytes).toBe(Buffer.byteLength(text, "utf8"));
+  });
+
+  it("产物目录按内容指纹隔离：同一会话里不同文档不共用目录（引擎会清空目录）", async () => {
+    const { port, parse } = fakeLocalInfraPort({});
+    const artifactStore = subdirArtifactStore();
+
+    await resolvePdf({
+      localInfra: localInfra({ port }),
+      artifactStore,
+      fileSystemPort: fakeFileSystemPort("sha256:aaaa1111"),
+    });
+    await resolvePdf({
+      localInfra: localInfra({ port }),
+      artifactStore,
+      fileSystemPort: fakeFileSystemPort("sha256:bbbb2222"),
+    });
+
+    expect(parse).toHaveBeenCalledTimes(2);
+    const first = parse.mock.calls[0]![0].outputDir as string;
+    const second = parse.mock.calls[1]![0].outputDir as string;
+    expect(first).not.toBe(second);
+  });
+
+  it("产物目录按内容指纹隔离：同一份文档重复解析落在同一目录（幂等）", async () => {
+    const { port, parse } = fakeLocalInfraPort({});
+    const artifactStore = subdirArtifactStore();
+
+    await resolvePdf({
+      localInfra: localInfra({ port }),
+      artifactStore,
+      fileSystemPort: fakeFileSystemPort("sha256:aaaa1111"),
+    });
+    await resolvePdf({
+      localInfra: localInfra({ port }),
+      artifactStore,
+      fileSystemPort: fakeFileSystemPort("sha256:aaaa1111"),
+    });
+
+    expect(parse.mock.calls[0]![0].outputDir).toBe(parse.mock.calls[1]![0].outputDir);
   });
 });
