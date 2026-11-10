@@ -2183,3 +2183,31 @@ stdio stderr → adapter 有界缓冲与脱敏 → 已有 `McpServerStatus.error
 界面处理建议只按已有 `failureKind` 国际化，不按错误文本分流；`tools/call`、工具结果、
 权限、重试和错误分类不变。展示契约见根 `docs/settings-mcp-list.md`，CLI 回归在
 `packages/adapters/tests/mcp.test.ts`，App 使用候选 E2E，不恢复业务单测。
+
+## PDF 本地 OCR 自动供给（2026-11-11）
+
+附件解析（local 路径）→ 判定层（`capability-provisioning/rules.ts` 静态规则表）→ 就绪投影
+（`doctor()` 报告，**单轮任务内缓存**，跨轮不缓存）→ `LocalInfraPort.parse`（引擎在端口后，
+ZCode 不 spawn 子进程）→ markdown 文本块（既有 `contentBlocks` 展开点 `conversation.ts`，
+**不新增投影点**）。
+
+触发条件收紧：本地路径 PDF 且模型能力位**显式** `supportsImage === false` 且
+`supportsPdf === false`（两个都不可用时，本地 OCR 是唯一能在不把文档送出机器的前提下拿到
+文字的路）；能力位未知 ⇒ 不委派、维持现状。分支插在「页图渲染不可用」与「回落 file block」
+之间 ⇒ 视觉模型（`supportsImage === true`）与原生 PDF 模型（`supportsPdf === true`）行为不变。
+
+产物落**会话级 artifact 目录**（`ToolArtifactStorePort.resolveSessionArtifactDir`，目录布局由
+artifact store 拥有，业务层不重算），**不落在用户源文件旁**；拿不到目录即放弃这条路并给明确
+错误文本。OCR 产物在 workspace 资源索引登记为 `kind: "ocr"` 的变体（新增 kind，不复用
+`transcript` / `original`）。
+
+不就位按三层分别给出**确定的下一步**：缺引擎给装法、缺权重给
+`zcode ocr models download --tier <t>`、体检失败给 `zcode ocr doctor`。引擎调用失败**不换档
+重跑、不静默换路**。降级策略配成 `cloud` 时**明确拒绝**（v1 未实现，不悄悄按 `error` 执行）。
+
+契约改动：`AgentRuntimeDeps` 新增 `localInfraPort?` / `localInfraDegradation?`；
+`WorkspaceResourceVariant.kind` 新增 `ocr`；`ToolArtifactStorePort` 新增**可选**方法
+`resolveSessionArtifactDir?`；`ocrConfigSchema` 新增 `degradation` 键。工具 schema、description、
+权限规则与链路第 5/6 步（调度、UI 投递）不受影响；详见
+[capability-provisioning.md](../capability-provisioning.md) 与
+[message-attachments.md](../message-attachments.md) 同日章节。

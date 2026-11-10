@@ -1,16 +1,18 @@
 # 能力按需供给（Capability Provisioning）
 
-Status: **规格草案**（2026-11-11）：决策已定，分三步实施；**第 1 步待实现**。
+Status: **第 1 步已实现**（2026-11-11）：就绪状态投影 + 规则表 + 本地 OCR 自动路线已落地；第 2 / 3 步未动。
 
 ### 实施状态（2026-11-11）
 
 | 落点 | 路径 | 状态 |
 | --- | --- | --- |
-| 本 spec | `apps/zcode-cli/docs/design/v2/capability-provisioning.md` | ✅ 已写（草案） |
-| 供给层实现 | `apps/zcode-cli/packages/core/src/runtime/helpers/capability-provisioning/` | ❌ 未写（第 1 步） |
-| `LocalInfraPort` 的装配 | `packages/bootstrap/src/app/port-wiring.ts` | ❌ 未装（当前只在 `zcode ocr` 命令组里用；第 1 步要装进 runtime 依赖） |
-| 降级策略配置键 | `adapters/src/config/schema.ts` 的 `ocrConfigSchema` | ❌ 未加 `degradation` |
-| 产物 variant kind | `contracts` 的 `WorkspaceResourceVariant.kind` | ❌ 未加 `ocr` |
+| 本 spec | `apps/zcode-cli/docs/design/v2/capability-provisioning.md` | ✅ 已写 |
+| 供给层实现 | `apps/zcode-cli/packages/core/src/runtime/helpers/capability-provisioning/` | ✅ 已写（`rules.ts` / `readiness.ts` / `local-ocr.ts` / `projection.ts`） |
+| `LocalInfraPort` 的装配 | `packages/bootstrap/src/app/port-wiring.ts` | ✅ 已装（并注入 `AgentRuntimeDeps.localInfraPort`） |
+| 降级策略配置键 | `adapters/src/config/schema.ts` 的 `ocrConfigSchema` | ✅ 已加 `degradation` |
+| 产物 variant kind | `contracts` 的 `WorkspaceResourceVariant.kind` | ✅ 已加 `ocr` |
+| 产物目录解析 | `contracts` 的 `ToolArtifactStorePort.resolveSessionArtifactDir?` | ✅ 已加（可选方法；缺席即放弃本地路线） |
+| 配置读取的唯一 owner | `adapters/src/config/ocr-config.ts` 的 `loadOcrRuntimeSettings` | ✅ 已写（命令面与 runtime 共用同一份配置） |
 
 > ⚠️ **本 spec 是新的一层，不是给已有层加分支。** 现有四层各管一件事，缺的正是「就位」这一环 —— 现在整条链的能力供给是「**不可用就报错**」（`engine_unavailable` / `transcription_engine_unavailable`），而产品要的是「**不可用就建起来**」。
 
@@ -157,7 +159,11 @@ export type DegradationPolicy =
 | 7 | PDF | 同上 | 不可用（第 ①② 层） | **明确报错** + 装法 | `error` |
 | 8 | PDF | 同上 | 未就位（第 ③ 层） | **明确报错** + 下载命令 | `error` |
 | 9 | PDF | 同上 | 就绪但**本次调用失败** | 明确报错（引擎原因），**不重跑、不换路** | `error`（第 3 步才可能 `cloud`） |
-| 10 | PDF | 能力位**未知**（`undefined`） | 任意 | 维持现状（**不委派**） | — |
+| 10 | PDF | 能力位**未知**（`undefined`），**或**供给层端口未装配 | 任意 | 维持现状（**不委派**） | — |
+| 11 | PDF | 同第 6 行（两个 `=== false`） | 任意 | **明确报错**（`cloud` 策略在 v1 未实现） | — |
+
+⚠️ **第 11 行是第 6 行的前置**：降级策略配成 `cloud` 时**必须明确报错**，不能悄悄按 `error` 执行 —— 悄悄降级会让用户以为还在本地跑，文档也可能离开机器（§6、§10 的 A7）。
+
 
 ⚠️ **第 6 行的触发条件为什么是两个 `=== false`**：
 
@@ -218,12 +224,13 @@ export type DegradationPolicy =
 
 | 改动 | 落点 | 形状 |
 | --- | --- | --- |
-| **新增 runtime 依赖** | `core/src/runtime/types.ts:347` 的 `AgentRuntimeDeps` | `localInfraPort?: LocalInfraPort` |
-| **新增装配** | `packages/bootstrap/src/app/port-wiring.ts:69` 的 `wirePorts` | `createLocalInfraPort({ execution: executionPort, fileSystem: fileSystemPort, config: { mineruPath, mineruProxy }, pdf: pdfDocumentPort })` |
+| **新增 runtime 依赖** | `core/src/runtime/types.ts:347` 的 `AgentRuntimeDeps` | `localInfraPort?: LocalInfraPort`；`localInfraDegradation?: DegradationPolicy` |
+| **新增装配** | `packages/bootstrap/src/app/port-wiring.ts:69` 的 `wirePorts` | `createLocalInfraPort({ execution: executionPort, fileSystem: fileSystemPort, config: ocrSettings.infra, pdf: pdfDocumentPort })` —— 配置经 `loadOcrRuntimeSettings(workingDirectory)` 读一次，命令面与 runtime 共用 |
 | **附件解析传参** | `core/src/runtime/methods/turn.ts:632-650` 的 `resolveTurnAttachments` | 新增 `localInfra` 选项（`modelInputFormat` 已在传） |
 | **PDF 分支** | `core/src/runtime/helpers/local-media-resolver.ts:91` 的 `resolveLocalPdfAttachment` | 在「页图渲染不可用」与「回落 file block」之间插入本地 OCR 分支 |
 | **配置键** | `adapters/src/config/schema.ts:52` 的 `ocrConfigSchema` | 新增 `degradation: z.enum(["error", "cloud"]).optional()`（默认 `error`）—— ⚠️ `cloud` 在 v1 **未实现**，配了要明确报错（验收 A7） |
 | **产物登记** | `contracts` 的 `WorkspaceResourceVariant.kind`（现为 `original \| transcript \| frame \| thumbnail \| waveform` 闭集） | ✅ **新增 `ocr` kind**（D10；对外契约变更，见 §11） |
+| **产物目录解析** | `contracts` 的 `ToolArtifactStorePort` | ✅ **新增可选方法** `resolveSessionArtifactDir?(request, options?)` —— 会话级产物目录由 **artifact store 拥有**，业务层不重算 `<storageRoot>/cli/artifacts/<sessionId>/`；缺席即放弃本地路线（绝不退回「源文件旁」，D9） |
 
 ⚠️ **产物落盘位置必须覆盖**：local-infra 默认落 `<源文件目录>/<源文件名>.mineru/`（§5.5），那是**用户文件旁** —— 附件解析发生在会话里，往那儿写会污染用户目录。⇒ **供给层必须显式传 `outputDir`** 到 **workspace 的 artifact 目录**（D9；会话级 —— `NodeToolArtifactStore` 的根是 `<storageRoot>/cli/artifacts/<sessionId>/`，与附件物化产物同处、随会话一起清理）。这与 local-infra §6.1「调用方只提供 `outputDir`」一致，不越权。
 
@@ -318,15 +325,16 @@ export interface ProvisioningDecision {
 
 | spec | 关系 | 本 spec 对它的改动 |
 | --- | --- | --- |
-| [`local-infra.md`](./local-infra.md) | **引擎层**：本 spec 消费它的就绪判定与调用 | ⏸️ **v1 不改它的端口**（就绪由 `doctor()` 报告投影，§8.3）；§7.10「与 OCR 能力的接线」改为指向本 spec |
+| [`local-infra.md`](./local-infra.md) | **引擎层**：本 spec 消费它的就绪判定与调用 | ✅ **已改**：v1 不改它的端口（就绪由 `doctor()` 报告投影，§8.3）；§7.10「与 OCR 能力的接线」已加指向本 spec 的说明 |
 | [`capability-registry.md`](./capability-registry.md) | **能力调用面**：本 spec 在它**上面**一层 | ⏸️ v1 不改（整块未实现）；将来注册表的 `CapabilitySummary` 要带就绪状态 |
-| [`message-attachments.md`](./message-attachments.md) | **触发点**：附件解析链 | **要改**：PDF 分支增加「本地 OCR」路线；「不支持 PDF 的模型必须收到明确错误文本」改为「模型既不支持 PDF 也不支持图片时走本地 OCR，不就位才报错」 |
+| [`message-attachments.md`](./message-attachments.md) | **触发点**：附件解析链 | ✅ **已改**：PDF 分发矩阵增加「本地 OCR」与「不就位报错」两行；「不支持 PDF 的模型必须收到明确错误文本」改为「模型既不支持 PDF 也不支持图片时走本地 OCR，不就位才报错」 |
 | [`ocr-local.md`](./ocr-local.md) | **OCR 能力的输入/输出契约** | ⏸️ v1 不改（能力层整块未实现）；`OcrCapabilityInput` 补 `engine` / `tier` 一条由 local-infra §10 登记 |
-| [`tool/00-tool-change-chain.md`](./tool/00-tool-change-chain.md) | tool 改动的端到端链路 | ⚠️ **要改**：本 spec 改了附件 → prompt 的投影路径（CLI AGENTS.md：改 tool / adapter / 投影前必须先读并更新它） |
-| `adapters/src/config/schema.ts` 的 `ocrConfigSchema` | 配置层 | **要改**：新增 `degradation` 键（§8.3） |
+| [`tool/00-tool-change-chain.md`](./tool/00-tool-change-chain.md) | tool 改动的端到端链路 | ✅ **已改**：新增「PDF 本地 OCR 自动供给（2026-11-11）」条目（附件 → prompt 的投影路径变了） |
+| `adapters/src/config/schema.ts` 的 `ocrConfigSchema` | 配置层 | ✅ **已改**：新增 `degradation` 键（§8.3） |
 | [`model-assets.md`](./model-assets.md) | **第 2 步的依赖**：资产托管 | ⏸️ v1 不改 |
 | [`audio-input.md`](./audio-input.md) | 相邻能力（转写），whisper 是外部已安装依赖 | ⏸️ v1 不改；但判定表按可扩展设计（§7.2 的表要能加行） |
-| `contracts` 的 `WorkspaceResourceVariant.kind` | 产物登记的 kind 闭集 | ⚠️ **要改**：新增 `ocr` kind（对外契约变更） |
+| `contracts` 的 `WorkspaceResourceVariant.kind` | 产物登记的 kind 闭集 | ✅ **已改**：新增 `ocr` kind（对外契约变更） |
+| `contracts` 的 `ToolArtifactStorePort` | 产物目录的所有者 | ✅ **已改**：新增**可选**方法 `resolveSessionArtifactDir?`（D9 的落点由 store 拥有） |
 
 ⚠️ **同步清单里的「要改」都是 spec 层面的改动** —— 按 AGENTS.md「新增或修改行为前，先更新对应 spec」，第 1 步动手时**先改这几份 spec，再写代码**。
 

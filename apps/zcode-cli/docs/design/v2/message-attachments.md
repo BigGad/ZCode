@@ -438,7 +438,7 @@ type ModelMessageContent = string | MessageContentBlock[];
 - 图片默认走 `ImageProcessorPort.resizeToFit`，进入模型前最长边应限制在 2000 像素以内；后续支持 original detail 时必须由模型能力门控。Node/SEA 默认实现使用纯 JS Jimp adapter，以避免图片处理依赖平台原生二进制。
 - WebP 第一阶段不做 resize/transcode。Jimp 默认不支持 WebP 编码输出，adapter 必须原样返回 WebP bytes，`resized: false`，保留 `image/webp` MIME；如果后续引入 WebP resize，必须先在本 spec 中定义新的 WASM/native 资源加载、SEA 打包和降级行为。
 - SVG 不作为图片 base64 发送，优先按文本文件处理。
-- PDF 第一阶段可作为 media file block 或 fallback；不支持 PDF 的模型必须收到明确错误文本。有视觉能力的模型（`supportsImage`）优先走页图渲染（见「PDF 页图渲染与密码解锁（2026-10-16）」）。
+- PDF 第一阶段可作为 media file block 或 fallback；不支持 PDF 的模型必须收到明确错误文本。有视觉能力的模型（`supportsImage`）优先走页图渲染（见「PDF 页图渲染与密码解锁（2026-10-16）」）。⚠️ **2026-11-11 起**：模型**既不支持 PDF 也不支持图片**时，先走本地解析引擎（本地 OCR）—— 就绪就自动用，不就位才给明确错误文本（见「PDF 本地 OCR 自动供给（2026-11-11）」）。
 - 文本文件按统一预算读取，超限时返回 preview + artifact ref。
 - 对 data URL 校验 base64 非空、MIME 合法；空或损坏图片转稳定错误，不把坏 payload 发给 provider。
 - MIME 优先由内容 sniff，文件扩展名只作为 fallback。
@@ -746,11 +746,26 @@ read 工具已具备（`pages` 参数），本节把同一能力接入附件解�
 | --- | --- |
 | `modelInputFormat.supportsImage === true` 且 `PdfDocumentPort`、`ImageProcessorPort` 可用 | 页图 image blocks（≤20 页 + 尾注 text block），原始 file block 不投递 |
 | 否则 `supportsPdf === true` | 现状单 file block（media file block + dataUrl） |
-| 否则 | 现状 omit + 文本占位（`[PDF: source: <path>]`） |
+| 否则 `supportsImage === false` 且 `supportsPdf === false`，且本地解析引擎**已就位** | **本地 OCR 的 markdown 文本块**（见「PDF 本地 OCR 自动供给（2026-11-11）」） |
+| 否则 `supportsImage === false` 且 `supportsPdf === false`，且本地解析引擎**不就位** | 明确错误文本（含装法 / 下载命令），不静默失败、不静默换路 |
+| 否则（能力位未知） | 现状 omit + 文本占位（`[PDF: source: <path>]`） |
 
 渲染门槛取 `supportsImage`（页图本质是 image blocks；`supportsPdf=false` 但有视觉的模型
 同样受益），不要求 `supportsPdf`。渲染失败（port `unavailable`/`io_error`、无渲染路径）
 一律记 debug 后回退 file block，不得以错误终止 turn。
+
+⚠️ **本地 OCR 分支插在「页图渲染不可用」与「回落 file block」之间**（`local-media-resolver.ts` 的 `resolveLocalPdfAttachment`）—— 前两条路都不通时才考虑，且要求两个能力位**都显式为 `false`**（未知 = 不委派）。
+
+## PDF 本地 OCR 自动供给（2026-11-11）
+
+⚠️ 本节由 [`capability-provisioning.md`](./capability-provisioning.md) 定义，本节只记附件链侧的事实。
+
+- **触发**：本地路径 PDF + 模型**显式**既不支持 PDF 也不支持图片（`supportsImage === false` 且 `supportsPdf === false`）。
+- **行为**：ZCode **自动**调本机解析引擎（`LocalInfraPort.parse`），把 markdown 作为 **text block** 投进 prompt（与图片描述那条路同形：把模型吃不了的东西换成文字）。
+- **产物落点**：**会话级 artifact 目录**（`ToolArtifactStorePort.resolveSessionArtifactDir`），**不落在用户源文件旁**；拿不到该目录 ⇒ 放弃这条路并给明确错误文本，绝不退回源文件目录。
+- **登记**：OCR 产物在 workspace 资源索引里登记为 `kind: "ocr"` 的变体（不复用 `transcript` / `original`）。
+- **不就位**：按三层分别给出**确定的下一步** —— 缺引擎给装法（`uv tool install --python 3.12 "mineru>=4.0,<5"`），缺权重给 `zcode ocr models download --tier <t>`，体检失败给 `zcode ocr doctor`。
+- **不适用**：inline PDF（粘贴 / data URL）本轮不走这条路。
 
 ### 预算
 

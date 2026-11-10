@@ -922,6 +922,8 @@ Make sure to install httpx using `pip install httpx[socks]`.
 
 ### 7.10 与 OCR 能力的接线（v1 不做，边界写死）
 
+⚠️ **能力层的接线与「按需供给」不是一回事**：能力层（`ocr-local.md`）整块未实现；**供给层**（[`capability-provisioning.md`](./capability-provisioning.md)）已实现第 1 步 —— 它在**附件解析阶段**判定「模型既不支持 PDF 也不支持图片」时，**直接调本端口**把文档转成 markdown 投进 prompt，**不经过能力层**（能力层那套 `OcrCapabilityInput/Output` 契约仍待改，见本节末尾）。
+
 OCR 能力的引擎选择**不再由能力层做**：能力把文档交给 `localInfra` 端口，端口内部定档位、降级、回填 `tier` / `degradedFrom` / `warnings`。
 
 ⚠️ **两个引擎语义不能混**（v1 只有 MinerU，但 `ocr-local.md` 的 tesseract 路线仍在）：
