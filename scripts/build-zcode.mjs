@@ -158,16 +158,12 @@ async function stageZCodePackage({ packageRoot, version }) {
   const webDist = resolve(root, "packages", "web", "dist");
   const serverDist = resolve(root, "packages", "server", "dist");
   const agentBundle = resolve(root, "apps", "zcode-cli", "packages", "cli", "dist", "zcode.cjs");
-  // 本地基础设施管理的独立二进制（spec：apps/zcode-cli/docs/design/v2/local-infra.md §7.3）。
-  // ⚠️ 它不带 Agent 运行时，是第二个进程级入口 —— 缺了它，发行包里就没有这个命令。
-  const infrManageBundle = resolve(root, "apps/zcode-cli/packages/cli/dist/zcode-infr-manage.cjs");
   const agentProvider = resolve(root, "apps/zcode-cli/packages/cli/dist/provider");
 
   await assertDirectory(webDist, "web dist");
   await assertDirectory(serverDist, "server dist");
   await assertFile(resolve(serverDist, "entry-http.js"), "server HTTP entry");
   await assertFile(agentBundle, "agent app-server bundle");
-  await assertFile(infrManageBundle, "local infra manage bundle");
   await assertFile(resolve(agentProvider, "zcode-builtin.json"), "Agent provider config");
 
   await rm(packageRoot, {
@@ -188,7 +184,6 @@ async function stageZCodePackage({ packageRoot, version }) {
     recursive: true,
   });
   await cp(agentBundle, resolve(packageRoot, "agent", "zcode.cjs"));
-  await cp(infrManageBundle, resolve(packageRoot, "agent", "zcode-infr-manage.cjs"));
   // TUI 入口通过真正的 CLI 路径定位伴随配置；只复制 JS 会在仓库外启动失败。
   await cp(agentProvider, resolve(packageRoot, "agent/provider"), { recursive: true });
   await cp(
@@ -196,7 +191,6 @@ async function stageZCodePackage({ packageRoot, version }) {
     resolve(packageRoot, "agent/THIRD-PARTY-NOTICES.md"),
   );
   await chmod(resolve(packageRoot, "agent", "zcode.cjs"), 0o755);
-  await chmod(resolve(packageRoot, "agent", "zcode-infr-manage.cjs"), 0o755);
 
   await stageTuiRuntime(packageRoot);
   await copyRuntimeNodeModules(packageRoot);
@@ -208,9 +202,6 @@ async function stageZCodePackage({ packageRoot, version }) {
   const runner = resolve(packageRoot, "bin", "zcode.mjs");
   await cp(resolve(root, "scripts/zcode-distribution/runner.mjs"), runner);
   await chmod(runner, 0o755);
-  const infrManageRunner = resolve(packageRoot, "bin", "zcode-infr-manage.mjs");
-  await cp(resolve(root, "scripts/zcode-distribution/infr-manage-runner.mjs"), infrManageRunner);
-  await chmod(infrManageRunner, 0o755);
 
   await writeFile(
     resolve(packageRoot, "package.json"),

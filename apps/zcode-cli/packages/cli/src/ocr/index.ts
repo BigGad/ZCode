@@ -4,41 +4,40 @@ import { createNodeExecutionAdapter } from "@zcode/adapters/exec";
 import { createNodeFileSystemAdapter } from "@zcode/adapters/fs";
 import { createPopplerPdfDocumentAdapter } from "@zcode/adapters/pdf";
 import { loadFileConfig, loadProjectConfigs } from "@zcode/adapters/config";
-import { parseInfrManageArgs } from "./arguments.js";
+import { parseOcrArgs, type OcrCommandInput } from "./arguments.js";
 import { runDoctorCommand } from "./doctor-command.js";
 import { runModelsDownloadCommand } from "./models-command.js";
 import { runParseCommand } from "./parse-command.js";
-import { INFR_EXIT_ERROR, INFR_EXIT_OK, type InfrManageContext } from "./output.js";
+import { OCR_EXIT_ERROR, OCR_EXIT_OK, type OcrContext } from "./output.js";
 
 /**
- * `zcode-infr-manage` 的组合根。
+ * `zcode ocr` 的组合根。
  *
- * ⚠️ **本文件不得 import `run.ts` / `@zcode/bootstrap` / `@zcode/core`** ——
- * 那会求值 Agent 运行时、工具注册表与工作流模块，把整套业务依赖打进这个
- * 独立二进制（M1 / §7.3 的唯一可执行约束）。
+ * ⚠️ **本组是 `zcode` 的子命令组**（spec §7.3）—— 与 `zcode` 主入口同进程，
+ * 复用主入口的分派表、退出码、i18n 与遥测；**发行链不需要第二个 bin**。
  *
  * ⚠️ **端口依赖由这里注入**（`ExecutionPort` / `FileSystemPort`）——实现内部
  * 绝不允许 new 一个 ExecutionPort，否则会出现两个实例，代理策略与超时各走一套。
  */
-export interface InfrManageRuntime {
+export interface OcrRuntime {
   readonly port: LocalInfraPort;
   /** 释放运行时持有的资源（可选）。 */
   readonly dispose?: () => Promise<void> | void;
 }
 
-export interface InfrManageOptions {
+export interface OcrCommandOptions {
   /** 项目配置发现的工作目录；默认 `process.cwd()`。 */
   readonly workingDirectory?: string;
   /** 注入自定义运行时（测试用）。不给则按默认装配。 */
-  readonly createRuntime?: () => InfrManageRuntime | Promise<InfrManageRuntime>;
+  readonly createRuntime?: () => OcrRuntime | Promise<OcrRuntime>;
 }
 
-export const INFR_MANAGE_USAGE = `zcode-infr-manage —— 本地模型 / 解析基础设施管理
+export const OCR_USAGE = `zcode ocr —— 本地 OCR / 文档解析能力面
 
 用法：
-  zcode-infr-manage doctor [--json]
-  zcode-infr-manage parse --path <文件> [--output <目录>] [--tier <档位>] [--json]
-  zcode-infr-manage models download --tier <basic|standard> [--source <源>] [--json]
+  zcode ocr doctor [--json]
+  zcode ocr parse --path <文件> [--output <目录>] [--tier <档位>] [--json]
+  zcode ocr models download --tier <basic|standard> [--source <源>] [--json]
 
 子命令：
   doctor           本地解析引擎体检（只读，不下载任何权重）
@@ -63,19 +62,19 @@ export const INFR_MANAGE_USAGE = `zcode-infr-manage —— 本地模型 / 解析
  *
  * ⚠️ **退出码语义由本层决定**：底层模块不调 `process.exit`、不决定退出码。
  */
-export async function runInfrManage(
-  ctx: InfrManageContext,
-  argv: readonly string[],
-  options: InfrManageOptions = {},
+export async function runOcrCommand(
+  ctx: OcrContext,
+  input: OcrCommandInput,
+  options: OcrCommandOptions = {},
 ): Promise<number> {
-  const command = parseInfrManageArgs(argv);
+  const command = parseOcrArgs(input);
   if (command.kind === "help") {
-    ctx.stdout.write(INFR_MANAGE_USAGE);
-    return INFR_EXIT_OK;
+    ctx.stdout.write(OCR_USAGE);
+    return OCR_EXIT_OK;
   }
   if (command.kind === "error") {
-    ctx.stderr.write(`${command.message}\n\n${INFR_MANAGE_USAGE}`);
-    return INFR_EXIT_ERROR;
+    ctx.stderr.write(`${command.message}\n\n${OCR_USAGE}`);
+    return OCR_EXIT_ERROR;
   }
 
   const runtime = await (options.createRuntime ?? (() => createDefaultRuntime(options)))();
@@ -113,7 +112,7 @@ export async function runInfrManage(
  * ⚠️ **PDF 页数适配器是可选依赖**（poppler 的 `pdfinfo` 不是 ZCode 的依赖）：
  * 缺它时解析仍然可用，超时预算按 1 页计。
  */
-async function createDefaultRuntime(options: InfrManageOptions): Promise<InfrManageRuntime> {
+async function createDefaultRuntime(options: OcrCommandOptions): Promise<OcrRuntime> {
   const workingDirectory = options.workingDirectory ?? process.cwd();
   const execution = createNodeExecutionAdapter();
   const fileSystem = createNodeFileSystemAdapter();

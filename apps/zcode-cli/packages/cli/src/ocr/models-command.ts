@@ -1,9 +1,9 @@
 import type { LocalInfraPort } from "@zcode/contracts";
 import {
   exitCodeForError,
-  INFR_EXIT_ERROR,
-  INFR_EXIT_OK,
-  type InfrManageContext,
+  OCR_EXIT_ERROR,
+  OCR_EXIT_OK,
+  type OcrContext,
   toJsonError,
   writeJson,
 } from "./output.js";
@@ -13,13 +13,13 @@ const DOWNLOADABLE_TIERS = ["basic", "standard"] as const;
 type DownloadableTier = (typeof DOWNLOADABLE_TIERS)[number];
 
 /**
- * `zcode-infr-manage models download` —— 下载目标档位的模型权重。
+ * `zcode ocr models download` —— 下载目标档位的模型权重。
  *
  * ⚠️ **代理剥离只在这个子进程生效**（spec §7.9）：SOCKS 代理会让 MinerU 的 httpx 直接失败
  * （缺 `socksio`）。解析子进程是纯本地推理，不受影响。
  */
 export async function runModelsDownloadCommand(
-  ctx: InfrManageContext,
+  ctx: OcrContext,
   port: LocalInfraPort,
   options: {
     readonly json: boolean;
@@ -40,7 +40,7 @@ export async function runModelsDownloadCommand(
     } else {
       ctx.stderr.write(`${message}\n`);
     }
-    return INFR_EXIT_ERROR;
+    return OCR_EXIT_ERROR;
   }
 
   const source = options.source?.trim();
@@ -66,7 +66,7 @@ export async function runModelsDownloadCommand(
       warnings: result.warnings,
       durationMs: result.durationMs,
     });
-    return result.ok ? INFR_EXIT_OK : exitCodeForError(result.error!);
+    return result.ok ? OCR_EXIT_OK : exitCodeForError(result.error!);
   }
 
   if (!result.ok && result.error !== undefined) {
@@ -76,7 +76,7 @@ export async function runModelsDownloadCommand(
     ctx.stdout.write(`模型下载完成（档位 ${result.tier}）\n`);
   }
   ctx.stdout.write(`耗时 ${(result.durationMs / 1000).toFixed(1)}s\n`);
-  return result.ok ? INFR_EXIT_OK : exitCodeForError(result.error!);
+  return result.ok ? OCR_EXIT_OK : exitCodeForError(result.error!);
 }
 
 function isDownloadableTier(value: string): value is DownloadableTier {

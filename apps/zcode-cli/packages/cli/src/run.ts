@@ -26,6 +26,7 @@ import { runProvidersCommand } from "./providers-command.js";
 import { resolveCliCwd } from "./cwd.js";
 import { runLoginCommand, runLogoutCommand } from "./login-command.js";
 import { runMemoCommand } from "./memo-command.js";
+import { runOcrCommand } from "./ocr/index.js";
 import { runUsageCommand } from "./usage-command.js";
 import { runRecognizeCommand } from "./recognize-command.js";
 import { CLI_COMMAND_NAME, CLI_PROCESS_NAME } from "./process-name.js";
@@ -507,7 +508,10 @@ export const run = async (ctx: RunContext, deps: RunDependencies = {}): Promise<
     return 1;
   }
 
-  if (parsed.values.help === true) {
+  // ⚠️ `zcode ocr` 是 `zcode` 的**子命令组**，有自己的用法文案（`OCR_USAGE`）——
+  // 它必须在全局 `--help` 分发**之前**被接住，否则 `zcode ocr --help` 打印的是全局帮助。
+  // 该例外由 `zcode ocr` 自己消费（见下面的 ocr 分派）。
+  if (parsed.values.help === true && commandName(parsed.positionals) !== "ocr") {
     writeHelp(ctx.stdout, options.locale, options.detectedLocale);
     return 0;
   }
@@ -592,6 +596,26 @@ export const run = async (ctx: RunContext, deps: RunDependencies = {}): Promise<
     const message = error instanceof Error ? error.message : String(error);
     ctx.stderr.write(`${message}\n`);
     return 1;
+  }
+
+  // ⚠️ `zcode ocr` 在这里分派（**在 `--prompt` / `--target` 之前**）：
+  // OCR 是独立命令组，不该被无头链路劫持；`--help` 也由它自己消费。
+  if (commandName(parsed.positionals) === "ocr") {
+    return await runOcrCommand(
+      ctx,
+      {
+        positionals: parsed.positionals.slice(1),
+        flags: {
+          ...(typeof parsed.values.path === "string" ? { path: parsed.values.path } : {}),
+          ...(typeof parsed.values.output === "string" ? { output: parsed.values.output } : {}),
+          ...(typeof parsed.values.tier === "string" ? { tier: parsed.values.tier } : {}),
+          ...(typeof parsed.values.source === "string" ? { source: parsed.values.source } : {}),
+        },
+        json: parsed.values.json === true,
+        help: parsed.values.help === true,
+      },
+      { workingDirectory },
+    );
   }
 
   const commandDeps: RunDependencies = {

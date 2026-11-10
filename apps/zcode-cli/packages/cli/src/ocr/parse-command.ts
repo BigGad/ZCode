@@ -1,20 +1,20 @@
 import type { LocalInfraPort, LocalParseResult, MineruTier } from "@zcode/contracts";
 import {
   exitCodeForError,
-  INFR_EXIT_OK,
-  type InfrManageContext,
+  OCR_EXIT_OK,
+  type OcrContext,
   toJsonError,
   writeJson,
 } from "./output.js";
 
 /**
- * `zcode-infr-manage parse` —— 解析一份本地文档。
+ * `zcode ocr parse` —— 解析一份本地文档。
  *
  * ⚠️ 档位**原样透传**给端口：合法性由端口判定（内部码 `engine_not_found`），
  * CLI 预校验会让验收 A4 要求的错误形状出不来。
  */
 export async function runParseCommand(
-  ctx: InfrManageContext,
+  ctx: OcrContext,
   port: LocalInfraPort,
   options: {
     readonly json: boolean;
@@ -41,15 +41,15 @@ export async function runParseCommand(
 
   if (options.json) {
     writeJson(ctx, toJsonParseResult(result));
-    return result.ok ? INFR_EXIT_OK : exitCodeForError(result.error!);
+    return result.ok ? OCR_EXIT_OK : exitCodeForError(result.error!);
   }
 
   writeParseResult(ctx, result);
-  return result.ok ? INFR_EXIT_OK : exitCodeForError(result.error!);
+  return result.ok ? OCR_EXIT_OK : exitCodeForError(result.error!);
 }
 
 /** 把引擎的人读输出写到 stderr。 */
-function writeEngineProgress(ctx: InfrManageContext, text: string | undefined): void {
+function writeEngineProgress(ctx: OcrContext, text: string | undefined): void {
   if (text === undefined || text.trim() === "") return;
   ctx.stderr.write(`${text.trim()}\n`);
 }
@@ -68,7 +68,7 @@ export function toJsonParseResult(result: LocalParseResult): Record<string, unkn
   };
 }
 
-function writeParseResult(ctx: InfrManageContext, result: LocalParseResult): void {
+function writeParseResult(ctx: OcrContext, result: LocalParseResult): void {
   const lines: string[] = [];
   if (!result.ok && result.error !== undefined) {
     lines.push(`解析失败：${result.error.message}`);

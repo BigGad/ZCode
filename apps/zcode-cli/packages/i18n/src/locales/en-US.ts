@@ -21,6 +21,7 @@ Commands:
   login [zai|bigmodel]  Sign in through browser authorization
   logout     Remove the shared Z.AI login credentials
   memo       Validate a v3.0 case-file memo JSON (\`memo validate <file.json>\`; exit code 1 on a hard CF violation)
+  ocr        Local OCR / document parsing capability surface (\`ocr doctor|parse|models download\`)
   plugins    Manage plugins and marketplaces (\`plugins list|install|uninstall|enable|disable|update|validate|marketplace ...\`; alias: plugin)
   providers  Generate named model types in your Personal Provider Config (\`providers init [--dry-run]\`)
   recognize  Batch-recognize an image folder (\`recognize <folder> [--schema description|qa|structured]\`; 4 subagents by default, one per image)

@@ -1,8 +1,8 @@
 import type { LocalInfraDoctorReport, LocalInfraPort } from "@zcode/contracts";
-import { INFR_EXIT_OK, type InfrManageContext, writeJson } from "./output.js";
+import { OCR_EXIT_OK, type OcrContext, writeJson } from "./output.js";
 
 /**
- * `zcode-infr-manage doctor` —— 本地解析引擎体检。
+ * `zcode ocr doctor` —— 本地解析引擎体检。
  *
  * ⚠️ **只读**：不下载权重、不装依赖、不写任何状态。
  * ⚠️ **退出码恒为 0**（除非参数非法）：体检报告本身就是结果，"不可用"是**有效报告**
@@ -10,20 +10,20 @@ import { INFR_EXIT_OK, type InfrManageContext, writeJson } from "./output.js";
  * ⚠️ 标题必须写"本地解析引擎体检"——`zcode doctor` 是另一回事（运行时与打包假设检查）。
  */
 export async function runDoctorCommand(
-  ctx: InfrManageContext,
+  ctx: OcrContext,
   port: LocalInfraPort,
   options: { readonly json: boolean },
 ): Promise<number> {
   const report = await port.doctor();
   if (options.json) {
     writeJson(ctx, report);
-    return INFR_EXIT_OK;
+    return OCR_EXIT_OK;
   }
   writeDoctorReport(ctx, report);
-  return INFR_EXIT_OK;
+  return OCR_EXIT_OK;
 }
 
-function writeDoctorReport(ctx: InfrManageContext, report: LocalInfraDoctorReport): void {
+function writeDoctorReport(ctx: OcrContext, report: LocalInfraDoctorReport): void {
   const lines: string[] = ["本地解析引擎体检"];
   for (const engine of report.engines) {
     lines.push(`引擎 ${engine.engine}：${engine.available ? "可用" : "不可用"}`);

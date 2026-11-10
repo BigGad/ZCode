@@ -173,6 +173,22 @@ export const parseGlobalArgs = (argv: string[]) =>
       "image-glob": {
         type: "string",
       },
+      // `zcode ocr` 子命令旗标：本地 OCR / 文档解析（严格解析器要求全局注册，
+      // 组合校验在 packages/cli/src/ocr/arguments.ts）。
+      // ⚠️ 这四个名字跨能力域语义一致（`--path` 输入文件 / `--output` 产物目录 /
+      // `--tier` 档位 / `--source` 模型源）⇒ 将来 `zcode llm` / `zcode asr` 复用同一组。
+      path: {
+        type: "string",
+      },
+      output: {
+        type: "string",
+      },
+      tier: {
+        type: "string",
+      },
+      source: {
+        type: "string",
+      },
     },
     strict: true,
   });

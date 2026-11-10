@@ -1,24 +1,24 @@
 import type { LocalInfraError } from "@zcode/contracts";
 
 /** 退出码：成功。 */
-export const INFR_EXIT_OK = 0;
+export const OCR_EXIT_OK = 0;
 /** 退出码：参数非法 / 文件不存在 / 引擎不可用 / 执行失败 / 产物缺失。 */
-export const INFR_EXIT_ERROR = 1;
+export const OCR_EXIT_ERROR = 1;
 /** 退出码：超时（与 `capability-registry.md` §7 的能力退出码表同源）。 */
-export const INFR_EXIT_TIMEOUT = 124;
+export const OCR_EXIT_TIMEOUT = 124;
 
 /**
- * `zcode-infr-manage` 的输出通道。
+ * `zcode ocr` 的输出通道。
  *
  * ⚠️ **stdout 恒为单个 JSON 对象**（`--json` 时），进度与告警只走 stderr ——
  * MinerU 自己的 stdout 是人读文本（`已解析 1 个输入。`），**不得当 JSON 解析**。
  */
-export interface InfrManageContext {
+export interface OcrContext {
   readonly stdout: { write(chunk: string): unknown };
   readonly stderr: { write(chunk: string): unknown };
 }
 
-export function writeJson(ctx: InfrManageContext, value: unknown): void {
+export function writeJson(ctx: OcrContext, value: unknown): void {
   ctx.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
@@ -64,5 +64,5 @@ export function toJsonError(error: LocalInfraError): JsonError {
 
 /** 失败结果对应的退出码。 */
 export function exitCodeForError(error: LocalInfraError): number {
-  return error.code === "timeout" ? INFR_EXIT_TIMEOUT : INFR_EXIT_ERROR;
+  return error.code === "timeout" ? OCR_EXIT_TIMEOUT : OCR_EXIT_ERROR;
 }

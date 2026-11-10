@@ -1607,11 +1607,10 @@ exceptions:
       - apps/zcode-cli/packages/adapters/src/local-infra/models-status.ts
       - apps/zcode-cli/packages/adapters/src/local-infra/artifact-store.ts
       - apps/zcode-cli/packages/adapters/src/fs/zip-extract.ts
-      - apps/zcode-cli/packages/cli/src/infr-manage/index.ts
-      - apps/zcode-cli/packages/cli/src/infr-manage/main.ts
-      - apps/zcode-cli/packages/cli/src/infr-manage/arguments.ts
-      - apps/zcode-cli/packages/cli/src/infr-manage/output.ts
-      - apps/zcode-cli/packages/cli/src/infr-manage/doctor-command.ts
-      - apps/zcode-cli/packages/cli/src/infr-manage/parse-command.ts
-      - apps/zcode-cli/packages/cli/src/infr-manage/models-command.ts
-    reason: 本地模型/解析基础设施（2026-11-09，spec：apps/zcode-cli/docs/design/v2/local-infra.md）。三层各自有单一所有者：contracts 的 local-infra.port.ts 只声明端口（纯接口，不含 zod）；adapters 的 local-infra/* 负责引擎定位、档位判定、子进程调用与产物分类，zip-extract.ts 是它的通用解包工具；cli 的 infr-manage/* 只做参数解析、输出投影与退出码。依赖方向 contracts ← adapters ← cli 未变，且 zcode-infr-manage 入口不 import run.ts / @zcode/bootstrap / @zcode/core（独立二进制不引 Agent 运行时）。接管整个 contracts/adapters/cli 包不在本次范围内。
+      - apps/zcode-cli/packages/cli/src/ocr/index.ts
+      - apps/zcode-cli/packages/cli/src/ocr/arguments.ts
+      - apps/zcode-cli/packages/cli/src/ocr/output.ts
+      - apps/zcode-cli/packages/cli/src/ocr/doctor-command.ts
+      - apps/zcode-cli/packages/cli/src/ocr/parse-command.ts
+      - apps/zcode-cli/packages/cli/src/ocr/models-command.ts
+    reason: 本地模型/解析基础设施（2026-11-09，spec：apps/zcode-cli/docs/design/v2/local-infra.md；2026-11-11 命令面改名与 CLI 原子化修订）。三层各自有单一所有者：contracts 的 local-infra.port.ts 只声明端口（纯接口，不含 zod）；adapters 的 local-infra/* 负责引擎定位、档位判定、子进程调用与产物分类，zip-extract.ts 是它的通用解包工具；cli 的 ocr/* 只做组合校验、输出投影与退出码。依赖方向 contracts ← adapters ← cli 未变。⚠️ `zcode ocr` 是 `zcode` 的**子命令组**（不是独立二进制），故 cli 的 ocr/* 不再要求"不 import run.ts"，但仍不 import @zcode/bootstrap / @zcode/core 以免把 Agent 运行时打进命令面。接管整个 contracts/adapters/cli 包不在本次范围内。

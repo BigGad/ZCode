@@ -30,13 +30,9 @@ try {
   await exec("tar", ["-xzf", resolve(archive), "-C", directory]);
   await mkdir(workspace);
   await exec(process.execPath, [runner, "--help"], { cwd: workspace, env });
-  // 第二个进程级入口（本地基础设施管理）必须随发行包一起可用。
-  const infrHelp = await exec(
-    process.execPath,
-    [join(root, "bin/zcode-infr-manage.mjs"), "--help"],
-    { cwd: workspace, env },
-  );
-  assert.match(infrHelp.stdout, /zcode-infr-manage/);
+  // `zcode ocr` 是子命令组，随同一个入口一起可用（没有第二个 bin）。
+  const ocrHelp = await exec(process.execPath, [runner, "ocr", "--help"], { cwd: workspace, env });
+  assert.match(ocrHelp.stdout, /zcode ocr/);
   const version = (
     await exec(process.execPath, [runner, "--version"], { cwd: workspace, env })
   ).stdout.trim();

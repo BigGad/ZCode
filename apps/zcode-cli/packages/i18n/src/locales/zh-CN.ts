@@ -21,6 +21,7 @@ export const zhCN: ZCodeCopy = {
   login [zai|bigmodel]  通过浏览器授权登录
   logout     删除共享的 Z.AI 登录凭据
   memo       校验 v3.0 阅卷笔录 JSON（\`memo validate <file.json>\`；CF 硬违退出码 1）
+  ocr        本地 OCR / 文档解析能力面（\`ocr doctor|parse|models download\`）
   plugins    管理插件与市场（\`plugins list|install|uninstall|enable|disable|update|validate|marketplace ...\`；别名 plugin）
   providers  在 Personal Provider Config 里生成具名模型类型（\`providers init [--dry-run]\`）
   recognize  批量识别图片文件夹（\`recognize <folder> [--schema description|qa|structured]\`；默认并发 4，逐张派发子代理）
