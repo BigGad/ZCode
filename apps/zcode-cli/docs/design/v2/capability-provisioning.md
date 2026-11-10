@@ -1,6 +1,6 @@
 # 能力按需供给（Capability Provisioning）
 
-Status: **第 1 步已实现**（2026-11-11）：就绪状态投影 + 规则表 + 本地 OCR 自动路线已落地；第 2 / 3 步未动。
+Status: **第 1 步已实现**（2026-11-11）：就绪状态投影 + 规则表 + 本地 OCR 自动路线已落地；第 2 / 3 步未动。真实引擎跑通的运行时验证见 §9.4，探测成本实测见 §9.3。
 
 ### 实施状态（2026-11-11）
 
@@ -324,6 +324,29 @@ export interface ProvisioningDecision {
 ⚠️ **每个 spawn 约 0.9s 的额外开销不是 MinerU 的成本**：同一批命令直接跑只要 0.2s，走 `ExecutionPort` 变成 1.0s+ —— 差额来自 exec adapter 的 shell-init-snapshot 路线（起 bash 并 source 环境快照）。这是**执行适配器的既有通用行为**（所有 tool 调用都吃这份开销），不是本层引入的，本轮也**不顺手改**（会牵动 exec 语义，需单独立项）。
 
 ⚠️ **Windows / Linux 的绝对值未实测**（见 O12 补充测量项）；但结论依赖的是**相对关系**（探测成本 ≪ 解析成本）与**触发条件**（只在候选路径触发），跨平台应当成立 —— 绝对数值可能不同。
+
+### 9.4 运行时验证（真实引擎，2026-11-11）
+
+**环境**：macOS（Darwin 25.5.0）、MinerU 4.1.7、`device=mps`、`defaultTier=standard`（basic / standard 档模型均已下载）。
+
+**样本**：一张**图片型 PDF**（PIL 渲染的扫描件，4 行文字），文件 53,717 字节。
+
+**（a）命令面**：`zcode ocr parse --path ocr-scanned.pdf --output <dir> --json` ⇒ `ok: true`、`tier: standard`、`durationMs: 11456`；产出的 `markdown.md` 内容与样本文字逐行一致。
+
+**（b）完整附件链**（真实 `LocalInfraPort` + 真实 `NodeToolArtifactStore` + 真实 SQLite 资源索引；`modelInputFormat = { supportsText: true, supportsImage: false, supportsPdf: false }`）：
+
+| 观察点 | 实测 |
+| --- | --- |
+| 就绪探测 | 2916ms ⇒ `ready` / `tier: standard` |
+| 附件解析（含真实 OCR 推理） | 9306ms |
+| `contentBlock` | `type: "text"`，正文为 `[Attachment parsed by the local OCR engine (tier standard) because the selected model supports neither image nor PDF input. Source: ocr-scanned.pdf]` + OCR markdown 全文 |
+| `mime` / `storageKind` / `recoverability` | `text/markdown` / `inline` / `provider_ready` |
+| 产物落点（D9） | `<artifacts>/<sessionId>/ocr-0/{markdown.md, middle_json.json, structured_content.json}` —— **不在用户源文件旁** |
+| 资源索引登记（D10） | 条目 `kind: pdf`，变体 `ocr`（`text/markdown`，指向 `ocr-0/markdown.md`）+ `original`（`application/pdf`，指向源文件） |
+
+⚠️ **这次验证是手工脚本，不是自动化测试**：它依赖本机真装了 MinerU 与已下载的权重，进不了 CI。**回归仍在 core 的 hermetic 测试里**（用假端口覆盖 A1–A8）；本节留痕的是「真引擎 + 真产物 + 真索引」这条链确实跑通。
+
+⚠️ **A5（有视觉能力时行为不变）这次没有真模型回归**：本机没有跑一次真实的视觉模型会话，该断言仍由 core 测试的假端口覆盖。
 
 ## 10. 验收场景
 
