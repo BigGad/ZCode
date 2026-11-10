@@ -296,11 +296,34 @@ export interface ProvisioningDecision {
       │ ⑤ buildUserContentFromTurn → blocks.push(...)（既有展开点）                   │
 ```
 
-⚠️ **第 ② 步的探测有成本**（`doctor` 会 spawn `hardware detect` 与 `models show`）⇒ 任务内缓存是硬要求；跨任务不缓存（环境会变，沿用 local-infra §6.1）。
+⚠️ **第 ② 步的探测有成本**（`doctor` 会 spawn `hardware detect` 与 `models show`）⇒ 任务内缓存是硬要求；跨任务不缓存（环境会变，沿用 local-infra §6.1）。**实测见 §9.3。**
 
 ⚠️ **第 ③ 步只 spawn 一次引擎**（local-infra §6.2 的硬要求）；产物断言失败 ⇒ 失败，**不换档重跑**。
 
 ⚠️ **第 ⑤ 步不新增投影点**：产物走既有的 `contentBlocks` / `contentBlock` 展开（`conversation.ts:113`），与图片描述那条路（`capability-image-description.ts:31` 把 image block 换成 text block）**同形** —— 都是「把模型吃不了的东西换成文字」。
+
+### 9.3 探测成本实测（O8，2026-11-11）
+
+**环境**：macOS（Darwin 25.5.0）、MinerU 4.1.7、`device=mps`、`defaultTier=standard`；连续 5 次 `port.doctor()`，全部成功。
+
+| 环节 | 实测 |
+| --- | --- |
+| `doctor()` 端到端 | min **2452ms** / median **2465ms** / max **2498ms** |
+| ├ `mineru-kit hardware detect --json` | 1132ms |
+| ├ `mineru-kit models show` | 1020ms |
+| └ `mineru version --json` | 310ms |
+| 引擎定位（`locateMineruKit`） | 4ms |
+| 同一批命令**绕过 `ExecutionPort` 直接跑** | 0.20s / 0.19s / 0.30s |
+
+**结论：可接受 —— 第 1 步不拆 `readiness()` 端口方法，不改 local-infra 契约。** 依据：
+
+1. **探测只在本地引擎候选路径触发**：模型既不支持图片也不支持 PDF 时才走 rule-6/7/8；规则表里 rule-4 / rule-5（有视觉能力 / 支持 PDF）先命中，**一次都不探**。
+2. **任务内缓存**（按 `turnId`）⇒ 一轮任务最多付一次，一轮里多个 PDF 附件共享同一次探测。
+3. **探测不是瓶颈**：真正花钱的是第 ③ 步的 `parse`（本地 OCR 冷启动 + 推理，秒级到分钟级），2.5s 的探测在同一条链路上可以忽略。
+
+⚠️ **每个 spawn 约 0.9s 的额外开销不是 MinerU 的成本**：同一批命令直接跑只要 0.2s，走 `ExecutionPort` 变成 1.0s+ —— 差额来自 exec adapter 的 shell-init-snapshot 路线（起 bash 并 source 环境快照）。这是**执行适配器的既有通用行为**（所有 tool 调用都吃这份开销），不是本层引入的，本轮也**不顺手改**（会牵动 exec 语义，需单独立项）。
+
+⚠️ **Windows / Linux 的绝对值未实测**（见 O12 补充测量项）；但结论依赖的是**相对关系**（探测成本 ≪ 解析成本）与**触发条件**（只在候选路径触发），跨平台应当成立 —— 绝对数值可能不同。
 
 ## 10. 验收场景
 
@@ -349,5 +372,5 @@ export interface ProvisioningDecision {
 | O5 | 能力键与本层的边界 | —— | ✅ **已定**：本层叫 readiness / provisioning，不叫 capability（§8.1） |
 | O6 | **就绪状态在多窗口 / 多 workspace 下的共享** | 就绪是机器级的，但探测有成本；多窗口各探一次浪费 | 待定（§9.1）—— v1 先「每任务一次」，跨任务不缓存 |
 | O7 | **inline PDF（粘贴 / data URL）也要能走本地 OCR** | 需先物化路径 + 定 inline 产物的落点 | ✅ **已定（2026-11-11，用户确认）**：**v1 不做 inline PDF**（D11）。落地 inline 时还要另定 inline 产物的落点，不能直接套 D9 的会话级 artifact 目录 |
-| O8 | **`doctor()` 的探测成本是否可接受**（每次会 spawn `hardware detect` + `models show`） | 太慢就要拆一个只查 ①②③ 的 `readiness()` 端口方法（会改 local-infra 契约） | ⚠️ **待实测**（第 1 步落地时量一次） |
+| O8 | **`doctor()` 的探测成本是否可接受**（每次会 spawn `hardware detect` + `models show`） | 太慢就要拆一个只查 ①②③ 的 `readiness()` 端口方法（会改 local-infra 契约） | ✅ **已实测（2026-11-11）**：~2.5s/次（硬件 detect 1.1s + models show 1.0s + version 0.3s），任务内缓存后一轮一次 ⇒ **可接受，第 1 步不拆 `readiness()` 端口方法**（§9.3） |
 | O9 | **就绪状态的产物登记 kind**：`ocr` 是新增 kind，还是复用 `transcript` | 对外契约变更的幅度 | ✅ **已定（2026-11-11，用户确认）**：**新增 `ocr` kind**（D10），不复用 `transcript` |

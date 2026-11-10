@@ -1039,7 +1039,7 @@ OCR 能力的引擎选择**不再由能力层做**：能力把文档交给 `loca
 | O9 | `mineru` 与 `mineru-kit` 的 sibling 推导在没有 `mineru-kit` 的安装布局下怎么办（用户可能只装了其中一个） | 待定（doctor 降级为"只报版本检查不可用"） |
 | O10 | `zcode ocr` 是否也需要 `zcode` 那套遥测 / i18n | 待定（实现者） |
 | O11 | `asset` 命令组的 7 条待决（目录地址 / 签名 / 与模型仓库的关系 / 落盘位置 / `--offline` 语义 / `asset use` 写哪份配置 / 资产分类维度）—— §7.3 | 待决（产品 / 运维） |
-| O12 | **Windows 侧的补充实测**：`.exe` 布局、`ceiling` / `device` 在 CUDA（显存 < 8GB）下的取值、zip 里的 `images/` 是否一致、临时目录清理、首次运行真实耗时、1.2GB 权重的完整下载耗时、一次真实的 Doclib 运行 | 待补（2026-11-09 起在 Windows 机器上验证） |
+| O12 | **Windows 侧的补充实测**：`.exe` 布局、`ceiling` / `device` 在 CUDA（显存 < 8GB）下的取值、zip 里的 `images/` 是否一致、临时目录清理、首次运行真实耗时、1.2GB 权重的完整下载耗时、一次真实的 Doclib 运行、`doctor()` 的探测耗时（macOS 实测 ~2.5s/次，见 [capability-provisioning.md](./capability-provisioning.md) §9.3） | 待补（2026-11-09 起在 Windows 机器上验证） |
 
 ---
 
