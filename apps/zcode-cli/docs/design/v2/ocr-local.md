@@ -350,7 +350,7 @@ export interface ImagePreprocessPort {
 
 实现进 `apps/zcode-cli/packages/adapters/src/ocr/preprocess.ts`（纯计算 + 文件读写，走既有文件系统入口；不 spawn 子进程）。
 
-⚠️ **端口不接收"要做什么决定"**。`auto` / `none` / `full` / 显式列表的**判定在能力层**（`apps/zcode-cli/packages/capabilities/src/capabilities/ocr.ts`）做，端口只执行给定步骤列表。这样端口是纯函数式的，好测；判定策略留在能力层，改策略不动端口。
+⚠️ **端口不接收"要做什么决定"**。`auto` / `none` / `full` / 显式列表的**判定在能力层**（⚠️ **2026-11-12**：按 [`capability-cli-blocks.md`](./capability-cli-blocks.md) D8，能力层落在 `packages/core/src/capability/`，**不新建** `packages/capabilities`）做，端口只执行给定步骤列表。这样端口是纯函数式的，好测；判定策略留在能力层，改策略不动端口。
 
 ⚠️ **`ImageProcessorPort` 不是这个**。已有的 `apps/zcode-cli/packages/contracts/src/interfaces/image-processor.port.ts` 是给**视觉模型**准备输入用的（缩放 + 压缩到 base64 预算内），语义是"让模型能吃下"，不是"让 OCR 读得更准"。两者不要合并，也不要复用它的 `resizeToFit` / `prepareForModel`。
 
@@ -513,6 +513,11 @@ office-runtime 解析时读 sidecar（只读）→ 无文本层的页用 OCR 文
 
 ### 6.1 Sidecar 格式
 
+> ⚠️⚠️ **2026-11-12：本节（tesseract 变体 `version: 1`）已作废**，§6.1.1 的 MinerU 变体（`version: 2`）**一并作废**。
+> ⇒ **业务只认 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §6.2 的统一 sidecar `version: 3`**（引擎无关、页成分 + 元素位置 + 逐元素文字）。
+> ⇒ 旧变体字段 → 统一字段的**映射表见该 spec §6.3**（`page`(1 基) → `pageIndex`(0 基)、`content` → `text`、`image_source` → `imagePath`、`engine.pageWidthPt/pageHeightPt` → 页级 `widthPt/heightPt`）。
+> ⇒ **本节与 §6.1.1 保留作历史记录**，实施时**不得**按它们建模。
+
 ⚠️ **本节描述的是 tesseract 变体**。MinerU 变体见 §6.1.1 —— 两者**不是同一份 schema**。
 
 路径：`<源文件目录>/<源文件名>.zcode-ocr.json`（例：`扫描件.pdf.zcode-ocr.json`）。
@@ -569,6 +574,10 @@ office-runtime 解析时读 sidecar（只读）→ 无文本层的页用 OCR 文
 - `pages[].pixelWidth` / `pixelHeight` 是**预处理后**的图像尺寸（做了 deskew 会变）。
 
 ### 6.1.1 MinerU 变体
+
+> ⚠️⚠️ **2026-11-12：本节（`version: 2`）已作废** —— 统一到 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §6.2 的 **v3**（映射表见该 spec §6.3）。
+> ⚠️ **版本号不复用**：v1 = tesseract 变体、v2 = MinerU 变体，**都已废止**；统一格式走 **v3**，避免「version: 1」同时指两种不兼容的 schema。
+> ⇒ 本节保留作历史记录，实施时**不得**按它建模。
 
 ⚠️ **MinerU 的产物形态与 tesseract 不同**（块级 vs 词级、有类型无置信度），**硬塞进 §6.1 的 schema 会造出第三种"两边都不像"的格式**。
 
@@ -689,7 +698,7 @@ MinerU 变体的关键差异：
 
 5. `src/adapters/parse/pdf.ts` 的 `parsePdf` 接 `auxiliary`：
    - 逐页取 pdf.js 的文本层；
-   - 文本层为空（或 `strategy === "override"`）时，取 sidecar 里对应页的 OCR 文本；
+   - 文本层为空时，取 sidecar 里对应页的 OCR 文本（⚠️ **v3 的页文本由 `elements[]` 的文本类元素 `text` 顺序拼接得到**，见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §6.3）；
    - 两者都无 → 保持现状的 `"(no extractable text; the page may be scanned)"`；
    - OCR 文本**不覆盖** outline（书签是 PDF 自身的，比 OCR 准）。
 
@@ -699,11 +708,11 @@ MinerU 变体的关键差异：
 
 ### 6.3 锚点
 
-sidecar 的页号 → office-runtime 的锚点：`page:N`（1 基）。**一一对应，无换算**。词级 bbox 是**页内像素坐标**，不是 office-runtime 锚点体系的一部分（`Locator` 只到页/段/单元格粒度）。若将来需要 bbox 级锚点，另写 spec 扩 `Locator`。
+office-runtime 的锚点是 `page:N`（**1 基**）。⚠️ **统一 sidecar v3 的 `pages[].pageIndex` 是 0 基** ⇒ 换算：`page:N` ↔ `pageIndex = N - 1`（[统一格式的映射表](./capability-cli-blocks.md) §6.3 已写死）。词级 bbox 是**页内像素坐标**，不是 office-runtime 锚点体系的一部分（`Locator` 只到页/段/单元格粒度）。若将来需要 bbox 级锚点，另写 spec 扩 `Locator`。
 
 ### 6.4 sidecar 也是本地知识库的索引源
 
-⚠️ **MinerU 变体（v2）怎么填 `pagesByNumber`**：v2 的 `pages[].text` 是**该页的 markdown 文本**（由 `<!-- page N of M -->` 锚点切出），不是 tesseract 那种逐词拼接的纯文本 —— 消费方要理解这一点。`pagesByNumber` 两种变体都能填，但**填进去的内容语义不同**（tesseract = 纯识别文本；MinerU = 含版面结构的 markdown）。
+⚠️ **统一 sidecar v3 怎么填 `pagesByNumber`**：v3 **不存页级文本**（只存**逐元素**的 `text`）⇒ 消费方按 `elements[]` 顺序拼接文本类元素的 `text` 得到该页文本。`pagesByNumber` 的内容语义 = **该页的纯识别文本**（不含版面结构）—— ⚠️ 与已废止的 MinerU 变体（v2，页级 markdown 文本）语义**不同**，迁移时注意。
 
 客户端本地知识库（[`knowledge-rag.md`](./knowledge-rag.md)）把扫描件 PDF 的 OCR 文本作为索引来源，锚点同样是 `page:N`。**优先级规则**：同一 PDF 同时有文本层与 sidecar → **用文本层**（更准更全），sidecar 只在抽不出文本层时兜底；两者不合并。
 
@@ -732,11 +741,15 @@ sidecar 的 `source.sha256` 不匹配（源文件已改）→ 该 sidecar 作废
 
 1. **tesseract + poppler 的安装责任在用户机器上**。ZCode 不内置引擎二进制（§9），因此 `zcode ocr parse` 失败时**最常见**的原因是 `engine_unavailable`。→ 错误文案必须直接给出安装命令（§8 已写），业务方可以直接把 zcode 的 stderr 转给用户。
 2. **zcode 可执行文件的定位由业务方负责**。zcode 侧**不新增环境变量**（AGENTS.md：能用配置 / 旗标表达的优先不做环境变量）；业务方自行决定用配置文件还是进程环境变量把 zcode 路径传进来。
-3. **sidecar 是磁盘缓存，不只是接口**。业务方重复调 `zcode ocr parse` 处理同一文件时，应当命中 sidecar 而不重跑识别 —— 但注意 sidecar 的有效性判据是 `source.sha256` + `engine` 块（§6.1），**参数变了 sidecar 就不该复用**。→ 「源文件没变就跳过识别」这条捷径由谁做（zcode 内部还是业务方）→ 未决问题见 §11 第 9 条。
+3. **sidecar 是磁盘缓存，不只是接口**。业务方重复调 `zcode ocr parse` 处理同一文件时，应当命中 sidecar 而不重跑识别 —— ⚠️ **有效性判据与接力矩阵以 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §6.5 为准**（内容指纹 `source.sha256` + 档位判据 + 积木所需产物判据；**参数变了 sidecar 就不该复用**）。→ **「源文件没变就跳过识别」这条捷径由 zcode 内部做**（业务方只管调），已定，见 §11 第 10 条。
 
 ⚠️ **子进程路线在批量场景下的成本**：每次调用付一次 node 启动（~200-400 ms）+ 一次引擎探测。业务方处理一个案卷（几十个 PDF）时逐个 spawn 会重复付这笔钱，而真正的大头 tesseract 单页 3~4 s 反而是叠加的。→ 是否支持一次调用处理多个文件 → §11 第 9 条。
 
 ## 7. 状态所有者
+
+> ⚠️⚠️ **2026-11-12：本表与下面的 owner 图是 tesseract 时代的产物，多数行指向已不存在的包 / 文件**（`packages/capabilities`、`adapters/src/ocr/*` —— tesseract 兜底路线在 v1 不实现，见 §11 第 4 条）。⇒ **保留作历史记录，不得按它们建模**。
+> ⇒ **当前有效的层位划分以 [`capability-cli-blocks.md`](./capability-cli-blocks.md) D8 为准**：契约 `contracts/src/capability-blocks/` → 实现 `core/src/capability/` → 适配 `adapters/src/local-infra/` → 装配 `bootstrap/` → CLI `cli/src/ocr/`。
+> ⇒ **本表剩余的 tesseract 时代清理**（把每行改成 D8 的路径）留作独立议题，不在本轮范围。
 
 | 状态 / 事件流 | 唯一所有者 | 备注 |
 | --- | --- | --- |
@@ -763,27 +776,23 @@ sidecar 的 `source.sha256` 不匹配（源文件已改）→ 该 sidecar 作废
 业务客户端
   │  argv: ocr parse --path <文件> --json
   ▼
-CLI 层 (apps/zcode-cli/packages/cli/src/capability-command.ts)
-  │  解析 --input JSON → OcrCapabilityInput（zod 校验）
+CLI 层 (apps/zcode-cli/packages/cli/src/ocr/parse-command.ts)
+  │  解析 --path / --tier / --output / --pdf-password（组合校验，zod）
   ▼
-能力层 (apps/zcode-cli/packages/capabilities/src/capabilities/ocr.ts)
-  │  ① resolveGroup("tessdata-zh-en") → tessdata 目录   ← 每次调用都解析，不缓存
-  │  ② 判定预处理步骤（auto/none/full/显式）
-  │  ③ 逐页调度（并发 2）                            ← 唯一的编排点
+积木层 (apps/zcode-cli/packages/core/src/capability/)
+  │  ① 判定路线（PDF 原生分析 / 识别）        ← 唯一的编排点
+  │  ② 能力供给层决策：档位就绪？未就位则备资产 / 降级
+  │  ③ 命中 sidecar 缓存？→ 直接返回 cached:true
   ├──────────────────────────────┐
   ▼                              ▼                              ▼
-adapters/ocr/preprocess.ts   adapters/ocr/tesseract.ts   adapters/local-assets/
-  纯像素运算 + 写临时 PGM        probe() → ExecutionPort        只提供文件
-  （临时文件识别完即删）            ▼
-                                 tesseract 子进程
-                                 ▼
-                                 读 <outbase>.tsv
-                                 ▼
-                              adapters/ocr/tsv.ts（归一，纯函数）
-                                 │
-  ┌──────────────────────────────┘
+adapters/local-infra/         adapters/pdf/                adapters/local-assets/
+MinerU 路线：档位 / 产物收集    原生路线：文本层 + 图片对象      只提供文件
+  │                              │
+  ▼                              ▼
+adapters/port-wiring 装配 → EnginePort / PdfDocumentPort
+  │
   ▼
-adapters/ocr/sidecar-store.ts   ← 唯一的 sidecar 写入点（FileSystemPort，原子写）
+统一 sidecar v3 写入（FileSystemPort，原子写：先写临时文件再 rename）
   │
   ▼
 工作区：<源文件名>.zcode-ocr.json        office-runtime（只读消费）
@@ -821,7 +830,7 @@ adapters/ocr/sidecar-store.ts   ← 唯一的 sidecar 写入点（FileSystemPort
 | 引擎在但 `probe` 返回可用，跑起来却失败 | `process_failed` | `internal` | `1` | `details.engineCode` + stderr 尾（**不含路径里的凭据**，本命令无凭据） |
 | 输入不是 PDF / 图片 | `unsupported_input` | `unsupported_input` | `1` | |
 | 文件损坏 | `corrupted` | `invalid_input` | `1` | `details.engineCode = "corrupted"` |
-| 密码 PDF 且未给密码 | `password_protected` | `invalid_input` | `1` | `hint` 说明用 `--pdf-password`；**密码只经 argv 传递，不落盘、不入日志**（沿用 `pdf-document.port.ts` 的约定） |
+| 密码 PDF 且未给密码 | `password_protected` | `invalid_input` | `1` | `hint` 说明用 `--pdf-password`；**密码只经 argv 传递，不落盘、不入日志**（沿用 `pdf-document.port.ts` 的约定）。⚠️ **2026-11-12**：`zcode ocr` 积木**正式收 `--pdf-password`**（[`capability-cli-blocks.md`](./capability-cli-blocks.md) D16）；⚠️ **当前实现会静默忽略它**（`OcrFlags` 无此字段）⇒ 实施时必须补上，否则这条 hint 与实际行为不符 |
 | 某页识别失败（渲染失败 / tesseract 非零退出） | — | — | — | **不中断整批**：该页记为失败，其余页继续；最终若**全部**页失败才报错 |
 | **预处理失败**（解码失败 / 估角异常 / 写 PGM 失败） | — | — | — | **降级**：跳过预处理，把原图直接交给引擎，该页记一条 warning。预处理是**增益**不是**前提**，不该因为它把整页 OCR 拖垮 |
 | 用户取消 | `cancelled` | `cancelled` | `130` | |
@@ -926,8 +935,7 @@ adapters/ocr/sidecar-store.ts   ← 唯一的 sidecar 写入点（FileSystemPort
 **端到端手测**（需要本机装好 tesseract + poppler，**不是 CI 门禁**）：
 
 1. 造一份**带真 CJK 字形**的扫描件 PDF（用 Songti.ttc 嵌入，见 §2）。
-2. 写 `ocr-request.json`：`{ "path": "扫描件.pdf" }`。
-3. `zcode ocr parse --path <文件> --json` → 侧写文本里出现正确中文。
+2. `zcode ocr parse --path <文件> --json` → 侧写文本里出现正确中文（⚠️ **路径走 `--path`，不写 `ocr-request.json`**）。
 4. 用该 PDF 打开 pdf 插件面板 → 搜索框里能搜到 OCR 出来的词。
 
 **不测**：CI 里的真实 OCR 质量（依赖系统装包，跨平台不一致）→ 归到端到端手测。
@@ -952,7 +960,7 @@ adapters/ocr/sidecar-store.ts   ← 唯一的 sidecar 写入点（FileSystemPort
    - sidecar = **文件旁的派生物**，跟着源文件走，跨 session 天然共享（同一份文件），但**不进资源库索引**，不会被跨 workspace 检索命中；
    - L2 资源库 = **workspace 维度**的索引，跨 session 聚合，但资源种类是封闭集合 —— `WorkspaceResourceKind` 目前只有 `image | pdf | audio | video | stream | hardware | transcript | frame`，**没有 `ocr` / `text_layer` 种类**。
    → **待用户定**：OCR 产物要不要成为资源库的一种资源种类（需要扩 `WorkspaceResourceKind` + 扩资源库的 kind 封闭集合）？还是**就停在 sidecar**（本期倾向：sidecar 已满足「解析层能读到」这个核心诉求，扩资源库是另一件事）。**在定下来之前，本 spec 只实现 sidecar 这条路**。
-9. **去噪 / 去阴影要不要单独给「用户可发现的入口」？** 「保留在契约里、默认不启用」已定（§5.1），剩下的是**怎么让用户知道它们存在**。→ 倾向：`zcode cap describe ocr` 里列出全部可用预处理步骤与各自实测收益，让用户自己判断，不做自动推荐、不做自动开启。
+9. **去噪 / 去阴影要不要单独给「用户可发现的入口」？** 「保留在契约里、默认不启用」已定（§5.1），剩下的是**怎么让用户知道它们存在**。→ ⚠️ **2026-11-12 修订**：`zcode cap describe ocr` 随 `zcode cap run` 一起**作废**（不实现，见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) D4）⇒ 改为在 `zcode ocr --help` 的族内动词表里列出全部可用预处理步骤与各自实测收益，让用户自己判断，不做自动推荐、不做自动开启。
 10. **子进程路线的两个具体缺口**（§6.5 引入）：
    1. ~~**要不要支持一次调用处理多个文件？**~~ → ⚠️ **2026-11-12 已定**：**zcode 不做批量旗标**。业务自己编排（循环 / 并发 spawn 积木），见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) D1 / §3.4。代价（每次 spawn 付 ~200-400ms node 启动）由业务在自己一侧拉常驻 worker 消化。
-   2. **「源文件没变就跳过识别」这条捷径由谁做？** sidecar 已有 `source.sha256` + `engine` 块可判复用，但：zcode 内部跳过 → 业务方拿不到「本次没重跑」的语义，得看 `metrics`；业务方自己先读 sidecar 判断 → 省掉整个 spawn，但要业务方实现一遍 sha256 + engine 块比对。→ 倾向：**zcode 内部做**（能力层加 `if (sidecar 有效且源文件未变) → 复用`），业务方只管调；否则业务方要重复实现 sidecar 判据，两边容易判得不一致。
+   2. ~~**「源文件没变就跳过识别」这条捷径由谁做？**~~ → ⚠️ **2026-11-12 已定：zcode 内部做**。判据与接力矩阵见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §6.5；业务方只管调，「本次没重跑」的语义由 `output.cached` 给出。

@@ -388,7 +388,7 @@ export interface ProvisioningDecision {
 
 **样本**：一张**图片型 PDF**（PIL 渲染的扫描件，4 行文字），文件 53,717 字节。
 
-**（a）命令面**：`zcode ocr parse --path ocr-scanned.pdf --output <dir> --json` ⇒ `ok: true`、`tier: standard`、`durationMs: 11456`；产出的 `markdown.md` 内容与样本文字逐行一致。
+**（a）命令面**：`zcode ocr parse --path ocr-scanned.pdf --output <dir> --json` ⇒ `ok: true`、`tier: standard`、`durationMs: 11456`；产出的 `markdown.md` 内容与样本文字逐行一致。⚠️ **2026-11-12**：迁到统一信封后，`tier` 与 `durationMs` **不再是顶层字段** —— `tier` 进 `output`（或 sidecar 的 `engine.tier`）、`durationMs` 进 `metrics.durationMs`（见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §5.4 的迁移清单）。
 
 **（b）完整附件链**（真实 `LocalInfraPort` + 真实 `NodeToolArtifactStore` + 真实 SQLite 资源索引；`modelInputFormat = { supportsText: true, supportsImage: false, supportsPdf: false }`）：
 

@@ -559,7 +559,7 @@ zcode asset install --offline <dir>
 
 1. `zcode asset install tessdata-zh-en` → 落盘 46MB。
 2. `zcode asset path tessdata-zh-en` → 打印目录。
-3. `zcode cap run ocr --input ocr-request.json --json`（`ocr-request.json` = `{ "path": "扫描件.pdf" }`）→ 命令行带 `--tessdata-dir`（用 `ps` / 日志确认），识别结果与系统 tessdata **字节一致**。
+3. `zcode ocr parse --path <文件> --json`（⚠️ **路径走 `--path`，不写 `ocr-request.json`**）→ 命令行带 `--tessdata-dir`（用 `ps` / 日志确认），识别结果与系统 tessdata **字节一致**。
 4. 删掉 `configs/` 那一项再跑 → **必须报错而不是静默返回空**（回归 §3 的静默失败坑）。
 
 ## 14. 未决问题

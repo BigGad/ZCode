@@ -36,7 +36,7 @@ Status: **v1 已实现**（2026-11-09）：端口 + 命令面 + 回归测试已�
 - 不做常驻守护进程（进程按需拉起、用完即退）
 - 不做 MinerU / Python 环境的安装（只检测 + 调用）
 - **不做 tesseract 兜底**（tessdata 资产层未实现；见 §3.2）
-- **不接 `zcode cap run ocr` / `office-runtime` / 知识索引**（v1 = 先通链路）
+- **不接 `office-runtime` / 知识索引**（v1 = 先通链路）；⚠️ **2026-11-12**：`zcode cap run ocr` 这条命令已整体作废（见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) D4）⇒ 业务接入面是**族命令组积木** `zcode ocr inspect` / `zcode ocr parse`
 - **不在 SEA 单文件与 Electron 桌面版里提供 `zcode ocr`**（分发链限制，见 §7.3）
 
 ### 1.1 与既有 spec 的关系
@@ -73,7 +73,7 @@ Status: **v1 已实现**（2026-11-09）：端口 + 命令面 + 回归测试已�
 | D4 | 进程**按需临时拉起，用完即退**；无常驻守护 |
 | D5 | ⚠️ **已修订（2026-11-11，用户确认）**：命令面是 `zcode` 的**原子子命令组** `zcode ocr`，**不是独立二进制**（原决策为独立二进制 `zcode-infr-manage`）。理由：**CLI 原子化** —— 一个能力域一个命令组（`zcode ocr` / `zcode llm` / `zcode asr` / `zcode asset`），不设"基础设施总管"二进制 |
 | D6 | 托管边界：**只检测 + 调用**；引擎与 Python 环境由用户自装 |
-| D7 | **v1 = 先通链路**：二进制 + 端口 + 引擎链 + 降级告知 + 产物落工作区；不接 `zcode cap run ocr` / `office-runtime` / 知识索引 |
+| D7 | **v1 = 先通链路**：二进制 + 端口 + 引擎链 + 降级告知 + 产物落工作区；不接 `office-runtime` / 知识索引（⚠️ `zcode cap run ocr` 已作废，见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) D4） |
 | D8 | **v1 不做 tesseract 兜底**；降级链 = MinerU 自己的档位链 |
 | D9 | ⚠️ **已修订（2026-11-08，用户确认）**：**v1 改走无状态路线** `mineru-kit parse`（子进程内推理，**不要 server**）。原定"走 `mineru server`（Doclib）"的理由是"Doclib 有缓存 / 索引 / 检索"，但实测证明它**给不了结构化块**，而结构化块才是 v1 的刚需（§11.0.2） |
 
@@ -410,7 +410,7 @@ model.source: huggingface
 
 ⚠️ **bbox 是归一化 0~1 的四点（xyxy）**，与 tesseract 的**像素**坐标**单位不同** —— 两个 sidecar 变体的消费方必须按 `variant` 区分。
 
-⚠️ **bbox 的分母在产物里**：`extensions.docvortex_layout.pages[].width_pt / height_pt`（实测样本 595×842 pt）。⇒ 换算像素坐标 = `bbox × width_pt × dpi / 72`。**消费方要画高亮框就必须知道这个分母** —— sidecar v2 必须把它记进去，字段名 `pageWidthPt` / `pageHeightPt`（tesseract 变体记的是 `pixelWidth/pixelHeight/dpi`，两者要对齐，见 [`ocr-local.md`](./ocr-local.md) §6.1.1）。
+⚠️ **bbox 的分母在产物里**：`extensions.docvortex_layout.pages[].width_pt / height_pt`（实测样本 595×842 pt）。⇒ 换算像素坐标 = `bbox × width_pt × dpi / 72`。**消费方要画高亮框就必须知道这个分母** —— ⚠️ **2026-11-12 修订**：统一 sidecar **v3** 把它记成**页级** `widthPt` / `heightPt`（不再是 `engine.pageWidthPt/pageHeightPt`，也不再是 tesseract 变体的 `pixelWidth/pixelHeight/dpi`）—— 映射表见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §6.3。
 
 ⚠️ **无置信度**：MinerU 块**没有**置信度字段（tesseract 有）。
 

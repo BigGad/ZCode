@@ -52,11 +52,16 @@ TUI 的 slash command 候选列表见 [`tui-slash-command-suggestions.md`](./tui
 - `zcode logout`: 清理共享 credential store 中的 ZAI 登录态；如果 `oauth:active_provider` 当前是 `zai`，同步清空 active provider。
 - `zcode doctor`: 输出运行时和打包假设检查，是 CLI 健康检查和 smoke-test 的唯一进程级入口。
 
-⚠️ **`zcode ocr` 是 `zcode` 的原子子命令组**（本地 OCR 能力面，见 [`local-infra.md`](./local-infra.md) §7.3），**不是独立二进制**。它自带 `doctor` / `parse` / `models` 三个子命令。其中 `zcode ocr doctor` 检的是**本地解析引擎环境**（引擎可执行文件、硬件与可跑档位、模型是否就绪），与 `zcode doctor` 的**客户端运行时与打包假设**不是同一件事，两者不重叠、不互相替代。`zcode doctor` 仍是 CLI 自身的健康检查与 smoke-test 入口。
+⚠️ **`zcode ocr` 是 `zcode` 的原子子命令组**（本地 OCR 能力面，见 [`local-infra.md`](./local-infra.md) §7.3），**不是独立二进制**。它自带 `doctor` / `inspect` / `parse` / `models` 四个子命令（⚠️ **2026-11-12 新增 `inspect`**，形态见 [`capability-cli-blocks.md`](./capability-cli-blocks.md)）。其中 `zcode ocr doctor` 检的是**本地解析引擎环境**（引擎可执行文件、硬件与可跑档位、模型是否就绪），与 `zcode doctor` 的**客户端运行时与打包假设**不是同一件事，两者不重叠、不互相替代。`zcode doctor` 仍是 CLI 自身的健康检查与 smoke-test 入口。
+
+⚠️ **业务接入面是 `inspect` / `parse` 两个积木**（业务拿原子命令自己编排场景逻辑）—— 完整契约（统一信封、`key` 闭集、sidecar v3、进度通道）见 [`capability-cli-blocks.md`](./capability-cli-blocks.md)。
 
 - `zcode ocr doctor`: 只读体检本地解析基础设施（引擎可执行文件定位、硬件档位上限与可跑档位、模型是否就绪、缺失项与装法）。不下载权重、不装依赖、不写状态。退出码恒为 0（除非参数非法）—— 体检报告本身就是结果。
-- `zcode ocr parse --path <file> [--tier <tier>] [--output <dir>] [--json]`: 解析一份文档，产出 markdown + 结构化内容块。⚠️ 旗标统一用长名（与 MinerU 自己的 `--output` 一致）；`--json` 时 stdout 是单个 JSON 对象。⚠️ `--path` / `--output` / `--tier` / `--source` **注册在 `zcode` 全局旗标表**（严格解析器要求；与 `zcode plugins` / `zcode usage` / `zcode recognize` 同款做法），命令组只做组合校验。
+- `zcode ocr inspect --path <file> [--output <dir>] [--json] [--force]`: 只出**页成分**（纯文本 / 纯图片 / 文本+图片 / 空白）与**元素位置**，不返回文字正文。⚠️ 数字版 PDF 走 PDF 原生分析（**需要 poppler**），扫描件落识别路线。
+- `zcode ocr parse --path <file> [--tier <tier>] [--output <dir>] [--pdf-password <密码>] [--json] [--force]`: 解析一份文档，产出 markdown + 结构化内容块 + 页成分与位置。⚠️ 旗标统一用长名（与 MinerU 自己的 `--output` 一致）；`--json` 时 stdout 是**单个** JSON 对象（统一信封 `{version, key, ok, output, metrics}`，`key = "ocr.parse"`）。⚠️ `--path` / `--output` / `--tier` / `--source` / `--force` / `--pdf-password` **注册在 `zcode` 全局旗标表**（严格解析器要求；与 `zcode plugins` / `zcode usage` / `zcode recognize` 同款做法），命令组只做组合校验。⚠️ `--pdf-password` 只经 argv，不落盘、不入日志。
 - `zcode ocr models download --tier <basic|standard> [--source <source>]`: 下载本地解析引擎的模型权重。
+
+⚠️ **进度通道**：`inspect` / `parse` 耗时可能到分钟级（备权重 + 识别）⇒ 进度走 **stderr**（每行一个 NDJSON 事件 `{"type":"progress","phase":"provision|analyze|write","message":"…","percent":null}`）；`--json` 时 stdout 只有最终信封，**错误不进 stderr**（只进信封 + 退出码）。
 - `zcode asset ...`: 本地资产（语言包 / 权重）的安装、校验、切换，见 [`model-assets.md`](./model-assets.md)。与 `zcode ocr` **平级**，不嵌套在 `zcode ocr` 之下 —— 资产跨能力域共享。
 
 `zcode hello` 不再是受支持命令。CLI 不保留无业务语义的 greeting/smoke-test 命令；脚本、文档和测试需要使用 `zcode doctor` 或 `zcode --version` 表达健康检查意图。

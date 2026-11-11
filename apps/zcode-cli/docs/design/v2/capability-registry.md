@@ -24,7 +24,7 @@
 | 智能体（工作流 / 多 Agent） | 无 | **本批未覆盖** —— 需另写 spec。本注册表只提供「一次实现三投影」的能力机制，不提供编排 |
 | 音视频 / 流媒体 / 硬件输入 | 已有 [`multimodal-platform.md`](./multimodal-platform.md) 族 spec（`audio-input.md` / `video-frames.md` / `stream-input.md` / `hardware-sensor.md`） | **本批未覆盖**；且其中的 whisper 模型归属见 [`model-assets.md`](./model-assets.md) §1 的边界说明 |
 
-⚠️ **知识检索不是能力键，是 runtime 子系统**。按用户定的方向（客户端本地优先、服务端只是补充），本地知识库住在 ZCode runtime 里、由 runtime 每轮自动消费（`relevant_knowledge` 注入 + `KnowledgeSearch` 工具），它**不进**本注册表、**不投影**成 `zcode cap run knowledge.search`。它的离线动作（建索引 / 查索引）以 `zcode knowledge index|search` 子命令单独暴露——理由见 [`knowledge-rag.md`](./knowledge-rag.md) §17。
+⚠️ **知识检索不是能力键，是 runtime 子系统**。按用户定的方向（客户端本地优先、服务端只是补充），本地知识库住在 ZCode runtime 里、由 runtime 每轮自动消费（`relevant_knowledge` 注入 + `KnowledgeSearch` 工具），它**不进**本注册表、**不投影**成任何能力命令（⚠️ `zcode cap run` 已整体作废，见 §4.2 横幅）。它的离线动作（建索引 / 查索引）以 `zcode knowledge index|search` 子命令单独暴露——理由见 [`knowledge-rag.md`](./knowledge-rag.md) §17。
 
 ⚠️ **本地资产管理同样不是能力**。语言包 / 模型权重的下载、校验、切换（[`model-assets.md`](./model-assets.md)）**不进**本注册表、**不做**三投影 —— 它的使用者是人和运维，不是 agent，所以只有 `zcode asset ...` 一条 CLI 表面。这与知识检索「不投影成能力」是同一类判断，但理由不同：知识检索是 runtime 子系统，资产管理是**基础设施**。
 
@@ -45,7 +45,7 @@
 | **模型能力位** | `image` / `pdf` / `video` | `MODEL_CAPABILITIES`（`packages/shared/src/model-selection.ts`） | 「这个**聊天模型**能不能直接吃这类输入」→ 决定 `--capability image=xxx` 选谁 |
 | **能力键** | `ocr` / `doc.parse` / `vision.describe` … | 本 spec 的 `CapabilityRegistry` | 「这件**事**怎么做」→ 决定调哪个 `execute` |
 
-两者会重叠（`ocr` 的实现内部可能要用视觉模型复核），但**不是一回事**：`--capability` 这个旗标继续只管模型能力位，**不改语义**；能力键走新命令 `zcode cap run <key>`。
+两者会重叠（`ocr` 的实现内部可能要用视觉模型复核），但**不是一回事**：`--capability` 这个旗标继续只管模型能力位，**不改语义**；能力键是**注册表**里的概念（`CapabilityRegistry`），⚠️ **2026-11-12 起不再有 `zcode cap run <key>` 这条命令** —— CLI 面发的是**积木 id**（`ocr.inspect` / `ocr.parse` / …，见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §5.1 的闭集）。⚠️ **积木 id 与能力键是两个命名空间**：一个能力键（`ocr`）可对应多个积木；MCP / 内置工具投影仍发能力键，CLI 投影发积木 id（**有意的差异**，不是漂移）。
 
 ⚠️ **`--capability` 这个旗标名已被占用，不要复用**。既有实现见 `apps/zcode-cli/packages/cli/src/capability-override.ts`：全局 multiple 旗标，取值形态是 `<能力键>=<模型类型名>`（如 `--capability image=xxx`），且能力键必须 ∈ `MODEL_CAPABILITIES`。若投影 C 要「显式启用某个能力」，**另起旗标名**（如 `--enable-capability <key>`），不要与它撞名 —— 两者取值形态完全不同。
 
@@ -264,7 +264,7 @@ zcode cap run <key> [--input <file>] [--json] [--param k=v ...]
 3. `apps/zcode-cli/packages/cli/src/run.ts` —— 加 `case "cap"` 分派；`<key>` 取**位置参数**（`parsed.positionals`），**不是** `--key` 选项。
 4. help 文案（`zcode --help` 与 `zcode cap --help`）。
 
-⚠️ **投影 A 是业务客户端的主接入面**。交付形态已定为「业务客户端同机 + 子进程调 `zcode cap run`」（见 [`ocr-local.md`](./ocr-local.md) §6.5）—— 业务方会写代码解析 `cap run` 的输出信封与退出码。因此**投影 A 的信封与退出码是对外公共契约**，不是内部实现细节：字段增删与退出码语义变更都要走版本递增（§8）。投影 B / C 是 ZCode 内部自用的便捷面，不承担对外兼容性承诺。
+⚠️ ~~**投影 A 是业务客户端的主接入面**。交付形态已定为「业务客户端同机 + 子进程调 `zcode cap run`」~~ → ⚠️ **2026-11-12 修订**：业务方调的是**族命令组积木**（`zcode ocr parse --path …`），不是 `zcode cap run`（见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) D4）。**信封与退出码仍是对外公共契约**（§7 / §8 沿用），只是 §8 的 `key` 在 CLI 面取**积木 id**（§5.1 闭集）。投影 B / C 是 ZCode 内部自用的便捷面，不承担对外兼容性承诺。
 
 ### 4.3 投影 B — MCP
 
@@ -443,7 +443,7 @@ AGENTS.md 要求「涉及状态、时序、远端或异步同步的方案，用�
                    ▼
    能力实现 → 投影层 → 5. 信封 + 退出码（唯一出口）
 
-事件顺序（单次 `cap run`）：
+事件顺序（单次能力调用，投影无关）：
    解析 → 校验 → 能力执行 →（逐页：渲染 → 预处理 → 识别 → 断言产物）
         → 汇总 → 输出校验（outputSchema）→ 出参校验失败则兜成 internal
         → 投影层写信封 / stderr 一行 → 返回退出码
@@ -483,8 +483,14 @@ AGENTS.md 要求「涉及状态、时序、远端或异步同步的方案，用�
 
 ## 6. 包与目录放置
 
+> ⚠️⚠️ **2026-11-12：包层位已定（路线 a，契约下沉）** —— 见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) D8：
+> - **契约** → `apps/zcode-cli/packages/contracts/src/capability-blocks/`（⚠️ **不叫 `capabilities`** —— 那个目录已存在，是 provider / model 能力描述的空壳，撞名）；
+> - **实现** → `apps/zcode-cli/packages/core/src/capability/`；
+> - **装配** → `apps/zcode-cli/packages/bootstrap/src/capability/`。
+> ⇒ **下面这份 `packages/capabilities/` 的目录规划作废**（该包**不存在**，见 [`local-infra.md`](./local-infra.md) §13 实测表），保留作历史记录。
+
 ```
-apps/zcode-cli/packages/capabilities/
+apps/zcode-cli/packages/capabilities/          ← ⚠️ 作废：不存在
   src/
     contract.ts        # §3 的类型 + 错误码
     registry.ts        # §4.1 注册表
@@ -569,7 +575,9 @@ MCP 投影把 `ok: false` 映射成 MCP tool error（`isError: true` + 结构化
 
 ## 8. 输出信封
 
-`zcode cap run --json` 的 stdout 是**一个** JSON 对象：
+⚠️ **2026-11-12 修订**：CLI 面的命令不再是 `zcode cap run`（见 §4.2 横幅），而是**族命令组积木**（`zcode ocr parse` 等，见 [`capability-cli-blocks.md`](./capability-cli-blocks.md)）。**信封形状沿用本节**，只有 `key` 的取值按投影不同（见下）。
+
+`--json` 时 stdout 是**一个** JSON 对象：
 
 ```json
 {
@@ -580,6 +588,13 @@ MCP 投影把 `ok: false` 映射成 MCP tool error（`isError: true` + 结构化
   "metrics": { "durationMs": 1234, "items": 12 }
 }
 ```
+
+⚠️ **`key` 的取值分投影**：
+
+| 投影 | `key` 取值 | 说明 |
+| --- | --- | --- |
+| **CLI（族命令组积木）** | **积木 id**（`ocr.inspect` / `ocr.parse` / …，闭集见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §5.1） | 业务主接入面；一个能力键可对应多个积木 |
+| **MCP / 内置工具** | **能力键**（`ocr` / `doc.parse` / …） | 注册表里的键；跨投影通用 |
 
 失败时：
 
@@ -608,7 +623,7 @@ MCP 投影把 `ok: false` 映射成 MCP tool error（`isError: true` + 结构化
 | --- | --- |
 | 注册表 | 重复键注册抛错；`list()` 返回全部；`get()` 未知键返回 `undefined` |
 | 契约 | `execute` 返回的 `output` 过 `outputSchema`；不过则兜成 `internal` |
-| CLI 投影 | `cap list` / `cap describe` / `cap run` 三条命令的 stdout 与退出码；`--input` 指向非法 JSON → exit 1 + stderr 一行 |
+| CLI 投影 | ⛔ `cap list` / `cap describe` / `cap run` **不实现**（§4.2 横幅）⇒ 改为验收**族命令组积木**的 stdout 与退出码（落点见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §10.4）；⚠️ **CLI 包的测试必须显式登记进 `packages/cli/package.json` 的 `scripts.test` 清单**才会被跑 |
 | 退出码 | 逐条对上 §7 的表（用假能力注入，不连真引擎） |
 | 三投影同源 | 同一能力经 CLI / MCP / 内置工具调用，`inputSchema` 与实际收到的入参一致 |
 | 权限 | `mutating: true` 的能力经内置工具投影时被权限层拦下 |
@@ -622,7 +637,7 @@ MCP 投影把 `ok: false` 映射成 MCP tool error（`isError: true` + 结构化
 | `zcode recognize` | 视觉识别能力；已有独立模型优先链 + 接地不变量 | **不动**。未来可作为 `vision.describe` 能力的薄封装 |
 | `zcode memo validate` | 规则校验能力（memo-v30 的实例） | **不动**。[`standard-rule-engine.md`](./standard-rule-engine.md) §7 把它收敛成 `zcode standards validate --standard memo-v30` 的**薄封装**（行为、退出码、输出格式一字不变） |
 | `zcode plugins` / `zcode skills` / `zcode usage` | 管理类命令，不是能力 | 不动 |
-| `zcode doctor` | 运行时自检 | 不动，但 §4.2 的 `cap list` 是它的补充 |
+| `zcode doctor` | 运行时自检 | 不动（⚠️ §4.2 的 `cap list` 已作废，不作为它的补充） |
 
 ## 11. 实施顺序与未决问题
 
@@ -637,11 +652,11 @@ MCP 投影把 `ok: false` 映射成 MCP tool error（`isError: true` + 结构化
 
 **未决问题**
 
-1. **能力实现放哪一层？** §6 的路线 (a) 契约下沉进 `contracts` / `core`，还是 (b) 保留独立包并改架构文档 + policy？→ **实施前必须定**。
+1. ~~**能力实现放哪一层？**~~ → ⚠️ **2026-11-12 已定**：**路线 (a) 契约下沉**（契约 `contracts/src/capability-blocks/` → 实现 `core/src/capability/` → 装配 `bootstrap/`），见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) D8。⇒ **不新建 `packages/capabilities`**（该包不存在，且会撞 `contracts/src/capabilities/` 的名）。
 2. **MCP server 落在哪？** §4.3 的 (a) `packages/bootstrap/src/app/` 还是 (b) 插件包 + `OFFICIAL_PLUGIN_DEFINITIONS`？
 3. **`MODEL_CAPABILITIES` 是否扩到 `pdf` / `video`？** provider 的 `inputFormat` 已有 **5 个位**（`packages/provider/src/resolver.ts:84-89`：`supportsText` / `supportsImage` / `supportsVideo` / **`supportsAudio`** / `supportsPdf`），`modelSupportsCapability` 加两个 case 即可。⚠️ 但 **provider 侧已经有 `supportsAudio`**（`packages/provider/src/config/model-config.ts:117` 定义、`packages/ui/src/settings/model-provider-section/ProviderModelMetadata.ts:65` 已在消费）—— 缺的**不是** provider 侧的能力位，而是 **CLI 内容块与转写实现**：`ModelMessageContentBlock` **没有 audio 分支**（`apps/zcode-cli/packages/contracts/src/model/index.ts:408-415`），adapters 里也没有转写实现 → 「把音频喂给模型」这条路暂时不通，音频只能走「转写 → 文本」。扩展能力位属独立 spec，本期不动。
 4. **内置工具默认关还是默认开？** 本 spec 取「默认关」，需用户确认。旗标名建议 `--enable-capability`（**不可复用 `--capability`**，§2）。
 5. **能力注册表是否允许插件注册？** v1 只允许内置能力；插件自带 MCP server（既有形态）已经覆盖这个需求。
-6. **`zcode cap run --param` 是否够用？** 复杂输入（多文件、嵌套结构）一律走 `--input` JSON 文件，避免旗标膨胀。**批量输入另起旗标**（`--input-dir`），不改 `--input` 语义（§4.2）。
+6. ~~**`zcode cap run --param` 是否够用？**~~ → ⚠️ **2026-11-12 作废**：`zcode cap run` 整体不实现（§4.2 横幅）⇒ 参数怎么给由族命令组各自定义（[`capability-cli-blocks.md`](./capability-cli-blocks.md) §4.2），**不做批量旗标**（D1）。
 7. **规则引擎要不要注册成 `standards.validate` 能力键？** 本 spec 取**不注册**（`zcode standards validate` 保持独立命令面，退出码 `0/1/2` 作为明确例外写进 §7；理由见 [`standard-rule-engine.md`](./standard-rule-engine.md) §1 与 §7.1）。若将来要注册，三件事必须**同时**做：IO 错误改 `1`、补 `130`/`124`、删掉 `zcode standards validate` —— 只做一件就是对业务方的破坏性变更。
-8. **投影 C 何时做？** 它的前置是另写一份投影 spec 对齐 tool 变更链，不能在能力层做一半就上。
+8. **投影 C 何时做？** 它的前置是另写一份投影 spec 对齐 tool 变更链，不能在能力层做一半就上。⚠️ **2026-11-12：暂缓**（用户未定，见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §12 O4）—— CLI 积木面先行。
