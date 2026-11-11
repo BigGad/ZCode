@@ -408,6 +408,29 @@ export interface ProvisioningDecision {
 
 ⚠️ **实测遇到过一次引擎挂起**：同一份 PDF、同一台机器，前几次 8–12s 跑完，有一次 `mineru-kit parse` 进程 0% CPU 挂到 **10 分钟**（= local-infra §6.2 的 `PARSE_COLD_START_BUDGET_MS`）才被超时终止，随后按 A6 明确报错（不静默失败、不换路）。**挂起本身未能定位**（同命令单独跑正常，怀疑与 MPS 设备状态有关）—— 已知风险：引擎无响应时用户要等满 10 分钟才看到错误。超时阈值是 local-infra v1 的既有设计，本轮不动。
 
+### 9.5 运行时验证：全新机器的档位状态（2026-11-11）
+
+**背景**：第 2 步的自动备资产能不能触发，取决于适配层把「引擎明确报出仓库缺失」落成
+`missing`（未就位）还是 `unknown`（问不出来）。后者 ⇒ rule-8 报错、**永远不下载**。
+
+**（a）本机真引擎（权重已下好）**：`zcode ocr doctor` ⇒ `basic：ready` / `standard：ready`
+（`MinerU-4_models_torch 就绪`、`MinerU2.5-Pro-2605-1.2B-GGUF 就绪`）/ `flash、advanced：unknown`
+—— 与 `mineru-kit models show` 的原始输出**逐条一致**（解析器认得真实的人读输出）。
+
+**（b）全新机器**（用桩引擎模拟 `models show` 的「缺失」状态，**不下 1.2GB 权重**；
+桩引擎通过 `ocr.mineruPath` 指过去）：修复前后**同一条命令**的对照 ——
+
+| | 修复前 | 修复后 |
+| --- | --- | --- |
+| `basic` 档状态 | `unknown` | **`missing`** |
+| 就绪投影 | 「问不出来」⇒ rule-8 报错 | **「未就位」⇒ rule-13 命中 ⇒ 自动下载** |
+| 用户看到的下载命令 | `mineru-kit models download --tier basic`（**引擎原始命令**：引擎不在 PATH 时用户跑不动） | `zcode ocr models download --tier basic`（**ZCode 自己的命令**：走引擎定位 / 代理剥离 / 档位校验） |
+| `flash` / `advanced` | `unknown`，无下载命令 | `unknown`，无下载命令（不变） |
+
+⚠️ **这次验证是手工的**（桩引擎 + 真实 CLI 二进制），依赖本机环境，进不了 CI。**回归在
+adapters 的 `tests/local-infra/models-status.test.ts`**（6 条：缺失 / 就绪 / 部分缺失 /
+无映射 / 查不到状态 / 端到端到 doctor 报告）。
+
 ## 10. 验收场景
 
 沿用仓库约定（AGENTS.md）：**App 业务单测已退役**；CLI 侧保留各自包的回归测试入口，不默认全量。测试入口以目标包 `package.json` 与实际测试文件为准。
