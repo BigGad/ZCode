@@ -267,6 +267,7 @@ async function resolvePdf(options: {
   resourceIndexPort?: ReturnType<typeof fakeResourceIndexPort>;
   pdfDocumentPort?: PdfDocumentPort;
   imageProcessorPort?: ImageProcessorPort;
+  abortSignal?: AbortSignal;
 }) {
   const artifactStore = options.artifactStore ?? fakeArtifactStore();
   const resourceIndexPort = options.resourceIndexPort ?? fakeResourceIndexPort();
@@ -284,6 +285,7 @@ async function resolvePdf(options: {
     ...(options.imageProcessorPort !== undefined
       ? { imageProcessorPort: options.imageProcessorPort }
       : {}),
+    ...(options.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
   });
   return { resolved: resolved[0], artifactStore, resourceIndexPort };
 }
@@ -438,6 +440,19 @@ describe("能力供给层：自动备资产（第 2 步，D12/D13）", () => {
     const text = (resolved?.contentBlock as { text: string }).text;
     expect(text).toContain("rule: rule-8");
     expect(text).toContain("zcode ocr models download --tier basic");
+  });
+
+  it("A14：取消信号透传到权重下载（用户取消任务 ⇒ 下载一起停）", async () => {
+    // ⚠️ 断的是**同一个信号对象**一路传下去：附件解析 → 判定 → 备资产 → 端口请求。
+    // 只在适配器层断「端口把 signal 交给执行端口」不够 —— 中间任一段丢信号，
+    // 用户取消任务后下载还在跑（0.8–1.2GB，用户以为停了其实没停）。
+    const { port, downloadModels } = fakeLocalInfraPort({ report: notReadyReport() });
+    const controller = new AbortController();
+
+    await resolvePdf({ localInfra: localInfra({ port }), abortSignal: controller.signal });
+
+    expect(downloadModels).toHaveBeenCalledTimes(1);
+    expect(downloadModels.mock.calls[0]![0].signal).toBe(controller.signal);
   });
 });
 
