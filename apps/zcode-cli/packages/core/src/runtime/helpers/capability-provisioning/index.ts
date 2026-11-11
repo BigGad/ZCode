@@ -25,6 +25,14 @@ export {
   type LocalOcrRequest,
   type LocalOcrSuccess,
 } from "./local-ocr.js";
+export {
+  provisionLocalAssets,
+  type LocalAssetOutcome,
+  type LocalAssetProvisionFailure,
+  type LocalAssetProvisionInput,
+  type LocalAssetProvisionSuccess,
+  type ProvisionableTier,
+} from "./assets.js";
 export { buildLocalOcrFailureText, buildLocalOcrText } from "./projection.js";
 export type {
   LocalInfraProvisioning,

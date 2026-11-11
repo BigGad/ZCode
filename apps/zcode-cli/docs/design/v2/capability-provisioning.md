@@ -1,15 +1,16 @@
 # 能力按需供给（Capability Provisioning）
 
-Status: **第 1 步已实现**（2026-11-11）：就绪状态投影 + 规则表 + 本地 OCR 自动路线已落地；第 2 / 3 步未动。真实引擎跑通的运行时验证见 §9.4，探测成本实测见 §9.3。
+Status: **第 1 / 2 步已实现**（2026-11-11）：就绪状态投影 + 规则表 + 本地 OCR 自动路线 + **未就位时自动备资产（下载模型权重）**已落地；第 3 步（退云端）未动。真实引擎跑通的运行时验证见 §9.4，探测成本实测见 §9.3。
 
 ### 实施状态（2026-11-11）
 
 | 落点 | 路径 | 状态 |
 | --- | --- | --- |
 | 本 spec | `apps/zcode-cli/docs/design/v2/capability-provisioning.md` | ✅ 已写 |
-| 供给层实现 | `apps/zcode-cli/packages/core/src/runtime/helpers/capability-provisioning/` | ✅ 已写（`rules.ts` / `readiness.ts` / `local-ocr.ts` / `projection.ts`） |
-| `LocalInfraPort` 的装配 | `packages/bootstrap/src/app/port-wiring.ts` | ✅ 已装（并注入 `AgentRuntimeDeps.localInfraPort`） |
+| 供给层实现 | `apps/zcode-cli/packages/core/src/runtime/helpers/capability-provisioning/` | ✅ 已写（`rules.ts` / `readiness.ts` / `local-ocr.ts` / `projection.ts` / `assets.ts`） |
+| `LocalInfraPort` 的装配 | `packages/bootstrap/src/app/port-wiring.ts` | ✅ 已装（并注入 `AgentRuntimeDeps.localInfraPort` / `localInfraAutoProvision`） |
 | 降级策略配置键 | `adapters/src/config/schema.ts` 的 `ocrConfigSchema` | ✅ 已加 `degradation` |
+| 自动备资产配置键（第 2 步） | `adapters/src/config/schema.ts` 的 `ocrConfigSchema` | ✅ 已加 `autoProvision`（默认 `true`） |
 | 产物 variant kind | `contracts` 的 `WorkspaceResourceVariant.kind` | ✅ 已加 `ocr` |
 | 产物目录解析 | `contracts` 的 `ToolArtifactStorePort.resolveSessionArtifactDir?` | ✅ 已加（可选方法；缺席即放弃本地路线） |
 | 配置读取的唯一 owner | `adapters/src/config/ocr-config.ts` 的 `loadOcrRuntimeSettings` | ✅ 已写（命令面与 runtime 共用同一份配置） |
@@ -22,8 +23,8 @@ Status: **第 1 步已实现**（2026-11-11）：就绪状态投影 + 规则表 
 
 - **触发点**：任务加载 / 附件解析阶段 —— 不是用户手动敲 `zcode ocr`。
 - **供给对象**：**能力可用性**，不是「模型环境」（§2 的 D1）。
-- **v1（第 1 步）范围**：本地 MinerU **已就位**时自动用；不就位时给**确定的下一步**（装什么 / 下什么）。
-- **v1 不做**：自动安装引擎二进制；自动下载权重（第 2 步）；退云端（第 3 步，默认关）。
+- **v1（第 1 / 2 步）范围**：本地 MinerU **已就位**时自动用；**模型权重未就位时自动备资产**（第 2 步，`ocr.autoProvision` 默认开）；引擎二进制不就位时给**确定的下一步**（装什么）。
+- **v1 不做**：自动安装引擎二进制（D5）；退云端（第 3 步，默认关）。
 
 **v1 不适用**
 
@@ -47,6 +48,8 @@ Status: **第 1 步已实现**（2026-11-11）：就绪状态投影 + 规则表 
 | D9 | **产物落 workspace 的 artifact 目录**：本地 OCR 的产物**不落在用户源文件旁**，落在会话级的 workspace artifact 目录（随会话产物一起清理）。 |
 | D10 | **产物登记用新的 `ocr` variant kind**：在 workspace 资源索引里，OCR 产物是**独立的一种变体**，不复用 `transcript` / `original`。 |
 | D11 | **inline PDF 不在 v1**：粘贴 / data URL 的 PDF 本轮不接本地 OCR（要先把 inline 产物的落点另定，见 O7）。 |
+| D12 | **自动备资产默认开启**（第 2 步，2026-11-11 本轮拍板）：引擎已装但模型权重没下时，**ZCode 自动下载**，不再要求用户先敲一次 `zcode ocr models download`。可用 `ocr.autoProvision: false` 关掉（回到第 1 步的行为：明确报错 + 手动命令）。 |
+| D13 | **第 2 步是阻塞式的**（2026-11-11 本轮拍板）：**备好资产再解析当前这份文档**。备资产失败 ⇒ 明确报错 + 手动下载命令，**不静默降级**成「模型没看到这份文档」。⚠️ 「先发一轮、后台备」被否：那样模型会给出一份**没看过文档**的回答，用户看不出来。 |
 
 ⚠️ **D3 与 D4 是为了让「后期可能都需要」变便宜。** 如果 v1 把「本地 / 云端」写成两个并列分支、或者把「不降级」写成「代码里压根没有那条路」，后期加云端退路就是改协议形状（对外契约要版本递增）；写成枚举成员则只是加一个值。
 
@@ -82,7 +85,7 @@ Status: **第 1 步已实现**（2026-11-11）：就绪状态投影 + 规则表 
 - **不可用** = ZCode 没资格自作主张（要往用户机器上装别人的可执行文件）→ 沿用既有报错路径，但要把「装什么、怎么装」说死；
 - **未就位** = ZCode 托管资产的本分（`model-assets.md` §1「模型与语言包由 ZCode 托管」）→ 由 ZCode 备（第 2 步）。
 
-⚠️ **v1 只做到「不可用时把下一步说清楚」**：第 ③ 层虽然已能判定，但自动下载被 asset 组的 7 条待决卡住（最关键是目录地址只有占位 URL —— [`local-infra.md`](./local-infra.md) §7.3），所以 v1 给的是**确切命令**（`zcode ocr models download --tier <t>`），不是自动下载。
+⚠️ **第 1 步只做到「不可用时把下一步说清楚」；第 2 步起第 ③ 层由 ZCode 自动备**：第 ③ 层要备的是 **MinerU 官方模型权重**，现成的 `mineru-kit models download --tier <basic|standard>` 就能做（`zcode ocr models download` 已实现并实测过）⇒ **不需要自建分发链，也不需要签名**（asset 组的 7 条待决卡的是 **ZCode 自己的资产分发**，不是这条）。
 
 ## 5. 三步路线
 
@@ -91,12 +94,14 @@ Status: **第 1 步已实现**（2026-11-11）：就绪状态投影 + 规则表 
 | 步 | 交付 | 依赖 | 兑现的产品承诺 |
 | --- | --- | --- | --- |
 | **1** | 就绪状态**可查询** + 附件链自动判定 + **本地已就位则自动用** | 无（复用现有 `LocalInfraPort` 与已实现的 `zcode ocr models download`） | D8「ZCode 自己起 OCR，用户不感知命令」 |
-| **2** | 未就位时**自动备资产** | asset 组的 7 条待决解掉（[`local-infra.md`](./local-infra.md) §7.3） | 「开箱可用」真正兑现 |
+| **2** | 未就位时**自动备资产**（③ 层模型权重） | 无（复用现有 `LocalInfraPort.downloadModels`） | 「开箱可用」真正兑现 |
 | **3** | 本地失败**退云端** | 上面 + provider 选择 + 授权交互 | 体验连续（**默认关**，见 D6） |
 
-⚠️ **第 1 步不需要等资产层**：用户自己跑一次 `zcode ocr models download --tier basic`（这条命令上一轮已实现并实测过）就满足第 ③ 层，ZCode 随即能用。这是「按需供给」里**不依赖任何未决决策**的那一段，也是最该先落地的一段。
+⚠️ **第 2 步不必等 asset 组的 7 条待决**（[`local-infra.md`](./local-infra.md) §7.3）：那 7 条是关于 **ZCode 自己的资产分发**（目录地址 / 签名 / 落盘位置 / `--offline` 语义…），而第 ③ 层要备的是 **MinerU 官方模型权重**，现成的 `mineru-kit models download --tier <basic|standard>` 已经能做（`zcode ocr models download` 已实现并实测过）⇒ **不需要自建分发链，也不需要签名**。
 
-⚠️ **第 1 步与第 2 步的差别只在「谁来按下下载键」**：ZCode 代按（自动）还是用户自己按（给命令）。判定与就绪状态的代码**完全共用**，所以第 1 步的实现不会因为第 2 步延期而返工。
+⚠️ **第 2 步与第 1 步的差别只在「谁来按下下载键」**：ZCode 代按（自动）还是用户自己按（给命令）。判定与就绪状态的代码**完全共用**，所以第 1 步的实现不会因为第 2 步延期而返工。
+
+⚠️ **第 1 步不需要等资产层**：用户自己跑一次 `zcode ocr models download --tier basic`（这条命令上一轮已实现并实测过）就满足第 ③ 层，ZCode 随即能用。这是「按需供给」里**不依赖任何未决决策**的那一段，也是最该先落地的一段。
 
 ### 5.1 第 1 步的用户可见行为
 
@@ -109,6 +114,19 @@ Status: **第 1 步已实现**（2026-11-11）：就绪状态投影 + 规则表 
 | 附件是普通文本 / 纯文本文件 | 走现有路线（**不变**） |
 
 ⚠️ **「本地已就位」的判定要分层给**：第 ① ② 层不就位 ⇒ 装法；第 ③ 层不就位 ⇒ 下载命令。两种「不就位」给出的下一步**不同**，不能合并成一句「请先安装 MinerU」。
+
+### 5.2 第 2 步的用户可见行为（自动备资产）
+
+| 场景 | ZCode 的行为 |
+| --- | --- |
+| 附件是 PDF，模型既不支持 PDF 也不支持图片，本地引擎**已装**但**模型权重没下**，且 `ocr.autoProvision` 未关 | **自动下载**该档位权重（`mineru-kit models download --tier <basic\|standard>`）⇒ 备好后**继续解析这份文档**（**新**） |
+| 同上，但下载**失败** | 明确报错：引擎给的原因 + **手动下载命令**；**不静默把没解析的文档当成已解析** |
+| 同上，但 `ocr.autoProvision: false` | 回到第 1 步的行为：明确报错 + 下一步命令 |
+| 引擎**二进制**没装 | **不变**：ZCode 不代装第三方可执行文件（D5），给装法 |
+
+⚠️ **备资产是阻塞的**（D13）：当前这轮会等权重下完再解析。权重体积是 **0.8–1.2GB 量级**（本机实测：`MinerU-4_models_torch` 854MB、`MinerU2.5-Pro-2605-1.2B-GGUF` 1.2GB）⇒ 等待可能到分钟级，**必须有可见提示**（runtime 日志的 `info`：开始 / 完成 / 失败）。
+
+⚠️ **取消要透传**：用户取消任务时，正在进行的权重下载必须一起停（`LocalModelsDownloadRequest` 带 `signal`）。
 
 ## 6. 降级策略（枚举）
 
@@ -157,13 +175,19 @@ export type DegradationPolicy =
 | 5 | PDF | `supportsImage !== true` 且 `supportsPdf === true` | 任意 | 现有 **file block** 路线（不变） | — |
 | 6 | PDF | `supportsImage === false` 且 `supportsPdf === false` | **已就位** | **本地 MinerU**（本 spec 新增） | `error` |
 | 7 | PDF | 同上 | 不可用（第 ①② 层） | **明确报错** + 装法 | `error` |
-| 8 | PDF | 同上 | 未就位（第 ③ 层） | **明确报错** + 下载命令 | `error` |
+| 8 | PDF | 同上 | 未就位（第 ③ 层）但**不能自动备**（关掉了自动备 / 该档位没有仓库映射） | **明确报错** + 下载命令 | `error` |
 | 9 | PDF | 同上 | 就绪但**本次调用失败** | 明确报错（引擎原因），**不重跑、不换路** | `error`（第 3 步才可能 `cloud`） |
 | 10 | PDF | 能力位**未知**（`undefined`），**或**供给层端口未装配 | 任意 | 维持现状（**不委派**） | — |
 | 11 | PDF | 同第 6 行（两个 `=== false`） | 任意 | **明确报错**（`cloud` 策略在 v1 未实现） | — |
 | 12 | PDF | 同第 6 行（两个 `=== false`） | 就绪但**拿不到会话级产物目录** | 明确报错（产物无处落盘），**绝不落在源文件旁** | `error` |
+| 13 | PDF | 同第 6 行（两个 `=== false`） | 未就位（第 ③ 层）且**可自动备**（basic/standard 档 + 自动备开关开着） | **本地 MinerU**（**先自动备资产再解析**） | `error` |
+| 14 | PDF | 同上 | **自动备资产失败** | 明确报错（引擎原因）+ 手动下载命令，**不静默降级** | `error` |
 
 ⚠️ **第 9 / 12 行是「执行阶段」的失败，不是「判定阶段」的路线**：判定已经命中第 6 行（本地引擎），但执行时挂掉了 ⇒ **报错按执行阶段的事实说**（§8.4），不能拿第 6 行的理由（「引擎已就绪，走本地 OCR」）当这次失败的理由。
+
+⚠️ **第 13 行在第 8 行之前判**：两者都是「第 ③ 层不就位」，区别只在**能不能自动备**（`ocr.autoProvision` 开关 + 该档位有没有仓库映射）。判序即优先级 ⇒ 先问「能不能自己搞定」，搞不定才报错。
+
+⚠️ **第 13 / 14 行是第 2 步**（自动备资产）：第 13 行是**判定**（走本地引擎，但要先备资产），第 14 行是**执行失败**（备资产没成功）⇒ 与第 9 / 12 行同理，报错按执行阶段的事实说。
 
 ⚠️ **第 11 行是第 6 行的前置**：降级策略配成 `cloud` 时**必须明确报错**，不能悄悄按 `error` 执行 —— 悄悄降级会让用户以为还在本地跑，文档也可能离开机器（§6、§10 的 A7）。
 
@@ -225,15 +249,19 @@ export type DegradationPolicy =
 
 ⚠️ **v1 不改 `LocalInfraPort`** —— 就绪状态直接由 `doctor()` 的报告**投影**而来：`doctor` 已经含三层信息（`engines[].available` = ①、`versionToolAvailable` + `version` = ②、`models[].status` + `downloadCommand` = ③）。理由：不为性能提前拆契约；探测成本在**任务内缓存**后只付一次。
 
+⚠️ **第 2 步只给 `LocalModelsDownloadRequest` 加两个可选字段**（不加方法、不加方法签名变更）：`signal?`（取消透传）与 `timeoutMs?`（下载预算覆盖）。`LocalInfraPort` 的**方法集合不变** —— `downloadModels` 第 1 步就已存在。
+
 | 改动 | 落点 | 形状 |
 | --- | --- | --- |
-| **新增 runtime 依赖** | `core/src/runtime/types.ts:347` 的 `AgentRuntimeDeps` | `localInfraPort?: LocalInfraPort`；`localInfraDegradation?: DegradationPolicy` |
+| **新增 runtime 依赖** | `core/src/runtime/types.ts:347` 的 `AgentRuntimeDeps` | `localInfraPort?: LocalInfraPort`；`localInfraDegradation?: DegradationPolicy`；`localInfraAutoProvision?: boolean`（第 2 步，默认 `true`） |
 | **新增装配** | `packages/bootstrap/src/app/port-wiring.ts:69` 的 `wirePorts` | `createLocalInfraPort({ execution: executionPort, fileSystem: fileSystemPort, config: ocrSettings.infra, pdf: pdfDocumentPort })` —— 配置经 `loadOcrRuntimeSettings(workingDirectory)` 读一次，命令面与 runtime 共用 |
 | **附件解析传参** | `core/src/runtime/methods/turn.ts:632-650` 的 `resolveTurnAttachments` | 新增 `localInfra` 选项（`modelInputFormat` 已在传） |
 | **PDF 分支** | `core/src/runtime/helpers/local-media-resolver.ts:91` 的 `resolveLocalPdfAttachment` | 在「页图渲染不可用」与「回落 file block」之间插入本地 OCR 分支 |
-| **配置键** | `adapters/src/config/schema.ts:52` 的 `ocrConfigSchema` | 新增 `degradation: z.enum(["error", "cloud"]).optional()`（默认 `error`）—— ⚠️ `cloud` 在 v1 **未实现**，配了要明确报错（验收 A7） |
+| **配置键** | `adapters/src/config/schema.ts:52` 的 `ocrConfigSchema` | 新增 `degradation: z.enum(["error", "cloud"]).optional()`（默认 `error`）—— ⚠️ `cloud` 在 v1 **未实现**，配了要明确报错（验收 A7）；第 2 步再加 `autoProvision: z.boolean().optional()`（默认 `true`，D12） |
 | **产物登记** | `contracts` 的 `WorkspaceResourceVariant.kind`（现为 `original \| transcript \| frame \| thumbnail \| waveform` 闭集） | ✅ **新增 `ocr` kind**（D10；对外契约变更，见 §11） |
 | **产物目录解析** | `contracts` 的 `ToolArtifactStorePort` | ✅ **新增可选方法** `resolveSessionArtifactDir?(request, options?)` —— 会话级产物目录由 **artifact store 拥有**，业务层不重算 `<storageRoot>/cli/artifacts/<sessionId>/`；缺席即放弃本地路线（绝不退回「源文件旁」，D9） |
+| **下载请求（第 2 步）** | `contracts` 的 `LocalModelsDownloadRequest` | ✅ **新增可选字段** `signal?: AbortSignal`（取消透传）、`timeoutMs?: number`（下载预算覆盖，缺省沿用端口的 60 分钟上限）—— 方法集合不变 |
+| **判定结果（第 2 步）** | `core/.../capability-provisioning/types.ts` 的 `ProvisioningDecision` | ✅ **新增可选字段** `requiresProvisioning?: boolean`（仅第 13 行为 `true`）—— 判定说「走本地引擎」，执行方据此**先备资产** |
 
 ⚠️ **产物落盘位置必须覆盖**：local-infra 默认落 `<源文件目录>/<源文件名>.mineru/`（§5.5），那是**用户文件旁** —— 附件解析发生在会话里，往那儿写会污染用户目录。⇒ **供给层必须显式传 `outputDir`** 到 **workspace 的 artifact 目录**（D9；会话级 —— `NodeToolArtifactStore` 的根是 `<storageRoot>/cli/artifacts/<sessionId>/`，与附件物化产物同处、随会话一起清理）。这与 local-infra §6.1「调用方只提供 `outputDir`」一致，不越权。
 
@@ -269,8 +297,9 @@ export interface ProvisioningDecision {
 
 | 情形 | 命中的 id | 话术要点 |
 | --- | --- | --- |
-| **路线不可用**（引擎没装 / 模型没下 / `cloud` 未实现 / 拿不到产物目录） | rule-7 / rule-8 / rule-11 / rule-12 | 说清「模型既不支持图片也不支持 PDF，而本地 OCR 这条路走不通」+ **确定的下一步**（装法 / 下载命令 / 体检命令） |
+| **路线不可用**（引擎没装 / 模型没下且不能自动备 / `cloud` 未实现 / 拿不到产物目录） | rule-7 / rule-8 / rule-11 / rule-12 | 说清「模型既不支持图片也不支持 PDF，而本地 OCR 这条路走不通」+ **确定的下一步**（装法 / 下载命令 / 体检命令） |
 | **引擎调用失败**（路由已判定为本地引擎，执行时挂掉） | rule-9 | 说清「本地 OCR 引擎处理这份文档时失败」+ 引擎给的原因；**不能说「路线不可用」**（引擎明明就绪），也不重复第 6 行的路由理由 |
+| **自动备资产失败**（第 2 步：权重没下下来） | rule-14 | 说清「ZCode 没能自动备好本地 OCR 模型权重」+ 引擎给的原因 + **手动下载命令**；**不能说「路线不可用」**（引擎在，只是权重没备好） |
 
 ⚠️ **每条报错都带规则 id**（`(rule: rule-9)` 这样的形状）—— 用户答疑、逐行回归测试都依赖它。
 
@@ -305,7 +334,10 @@ export interface ProvisioningDecision {
       │                                │   doctor() ─────────────> │ ── hardware ────>│
       │                                │   <── 三层就绪报告 ───────┤ <── models show ─┤
       │                                │                          │                  │
-      │                                │   ┌─ 不就位 → 报错 + 下一步 │                  │
+      │                                │   ┌─ 不就位 + 可自动备（第 2 步）              │
+      │                                │   │  ②' downloadModels(tier) >│ ── models dl ──>│
+      │                                │   │      <── {ok} ────────────┤ <── exit code ───┤
+      │                                │   ├─ 不就位 + 不能自动备 → 报错 + 下一步        │
       │                                │   └─ 就位   → ③ 调引擎     │                  │
       │                                │      parse(path, tier) ─>│ ── parse ───────>│
       │                                │      <── {ok, output} ───┤ <── exit code ───┤
@@ -315,6 +347,8 @@ export interface ProvisioningDecision {
       │                                │                          │                  │
       │ ⑤ buildUserContentFromTurn → blocks.push(...)（既有展开点）                   │
 ```
+
+⚠️ **第 ②' 步是第 2 步新增的**（未就位且可自动备）：`downloadModels(tier)` 走同一个端口，**不新增方法**。它是**阻塞的**（D13）⇒ 这一轮会等权重下完；下载期间必须有可见提示（runtime 日志 `info`），权重是 0.8–1.2GB 量级 ⇒ 可能到分钟级。
 
 ⚠️ **第 ② 步的探测有成本**（`doctor` 会 spawn `hardware detect` 与 `models show`）⇒ 任务内缓存是硬要求；跨任务不缓存（环境会变，沿用 local-infra §6.1）。**实测见 §9.3。**
 
@@ -380,11 +414,15 @@ export interface ProvisioningDecision {
 | A1 | 就绪状态可查 | 引擎缺失时返回「不可用 + 装法」；就位时返回三层全绿 | adapters |
 | A2 | 附件是 PDF、模型无视觉能力、本地已就位 | **自动**调本地引擎，markdown 投影进 prompt | core（附件解析） |
 | A3 | 同上但本地不可用（缺引擎） | 报错含**确切安装命令**，不静默失败、不静默换路 | core + adapters |
-| A4 | 同上但模型未就位（缺权重） | 报错含**确切下载命令**（`models download --tier <t>`） | core + adapters |
+| A4 | 同上但模型未就位（缺权重） | **自动下载权重后继续解析**（第 2 步）；备不好才报错，报错含**确切下载命令**（`models download --tier <t>`） | core + adapters |
 | A5 | 同上但模型**有**视觉能力 | 走**现有页图渲染路线**（行为不变） | core（回归） |
 | A6 | 引擎调用失败（退出码非 0） | 报错带引擎 stderr 尾部；**不自动换档重跑**、**不静默退云端** | adapters |
 | A7 | 降级策略默认取值 | 未配置 ⇒ `error`；配置为 `cloud` 时 v1 **明确拒绝**（未实现）而不是假装成功 | contracts + core |
 | A8 | 判定可解释 | 判定结果带命中的规则号与理由，能回答「为什么走本地 OCR」 | core |
+| A11 | **自动备资产**（第 2 步） | 模型未就位且 `ocr.autoProvision` 未关 ⇒ **自动下载**该档位权重，备好后**继续解析当前这份文档**（阻塞式，D13） | core + adapters |
+| A12 | **备资产失败** | 明确报错（带 rule-14 + 引擎原因 + 手动下载命令），**不解析、不假装看到了文档** | core |
+| A13 | **自动备资产可关** | `ocr.autoProvision: false` ⇒ 不下载权重，回到第 1 步的「明确报错 + 下一步命令」 | core + adapters |
+| A14 | **取消要透传** | 用户取消任务时，正在进行的权重下载**一起停**（取消信号透传到执行端口） | adapters |
 
 ⚠️ **A7 的形状很关键**：v1 不实现 `cloud`，但策略取值被配置成 `cloud` 时**必须明确报错**（"该策略尚未支持"），不能悄悄按 `error` 执行 —— 悄悄降级会让用户以为还在本地跑。
 
@@ -399,7 +437,7 @@ export interface ProvisioningDecision {
 | [`message-attachments.md`](./message-attachments.md) | **触发点**：附件解析链 | ✅ **已改**：PDF 分发矩阵增加「本地 OCR」与「不就位报错」两行；「不支持 PDF 的模型必须收到明确错误文本」改为「模型既不支持 PDF 也不支持图片时走本地 OCR，不就位才报错」 |
 | [`ocr-local.md`](./ocr-local.md) | **OCR 能力的输入/输出契约** | ⏸️ v1 不改（能力层整块未实现）；`OcrCapabilityInput` 补 `engine` / `tier` 一条由 local-infra §10 登记 |
 | [`tool/00-tool-change-chain.md`](./tool/00-tool-change-chain.md) | tool 改动的端到端链路 | ✅ **已改**：新增「PDF 本地 OCR 自动供给（2026-11-11）」条目（附件 → prompt 的投影路径变了） |
-| `adapters/src/config/schema.ts` 的 `ocrConfigSchema` | 配置层 | ✅ **已改**：新增 `degradation` 键（§8.3） |
+| `adapters/src/config/schema.ts` 的 `ocrConfigSchema` | 配置层 | ✅ **已改**：新增 `degradation` 键（§8.3）与 `autoProvision` 键（第 2 步，默认 `true`） |
 | [`model-assets.md`](./model-assets.md) | **第 2 步的依赖**：资产托管 | ⏸️ v1 不改 |
 | [`audio-input.md`](./audio-input.md) | 相邻能力（转写），whisper 是外部已安装依赖 | ⏸️ v1 不改；但判定表按可扩展设计（§7.2 的表要能加行） |
 | `contracts` 的 `WorkspaceResourceVariant.kind` | 产物登记的 kind 闭集 | ✅ **已改**：新增 `ocr` kind（对外契约变更） |
@@ -413,10 +451,11 @@ export interface ProvisioningDecision {
 | --- | --- | --- | --- |
 | O1 | **电子版 PDF 在「模型不支持 PDF 也不支持图片」时也要走 MinerU**（v1 不区分扫描件） | 慢；后续可用引擎的文本层探测做快路 | 待定（§7.2） |
 | O2 | 判定规则表落在 `resource-policy` 里还是独立模块 | —— | ✅ **已定**：独立模块（机器级 vs workspace 级 + 版本冲突，§8.2） |
-| O3 | **首轮要不要阻塞**：备资产可能要下 1.2GB，是「备好再发第一轮」还是「先发一轮、后台备」 | 延迟模型；后者要处理一半结果已出去的状态 | 待定（第 2 步） |
+| O3 | **首轮要不要阻塞**：备资产可能要下 1.2GB，是「备好再发第一轮」还是「先发一轮、后台备」 | 延迟模型；后者要处理一半结果已出去的状态 | ✅ **已定（2026-11-11，本轮拍板）**：**阻塞式**（D13）—— 备好资产再解析当前这份文档；「先发一轮、后台备」被否（那样模型会给出一份没看过文档的回答，用户看不出来） |
 | O4 | **退云端的授权形态**：一次性询问 / 配置项 / 每次任务 | D6 的落地形态 | 待定（第 3 步） |
 | O5 | 能力键与本层的边界 | —— | ✅ **已定**：本层叫 readiness / provisioning，不叫 capability（§8.1） |
 | O6 | **就绪状态在多窗口 / 多 workspace 下的共享** | 就绪是机器级的，但探测有成本；多窗口各探一次浪费 | 待定（§9.1）—— v1 先「每任务一次」，跨任务不缓存 |
 | O7 | **inline PDF（粘贴 / data URL）也要能走本地 OCR** | 需先物化路径 + 定 inline 产物的落点 | ✅ **已定（2026-11-11，用户确认）**：**v1 不做 inline PDF**（D11）。落地 inline 时还要另定 inline 产物的落点，不能直接套 D9 的会话级 artifact 目录 |
 | O8 | **`doctor()` 的探测成本是否可接受**（每次会 spawn `hardware detect` + `models show`） | 太慢就要拆一个只查 ①②③ 的 `readiness()` 端口方法（会改 local-infra 契约） | ✅ **已实测（2026-11-11）**：~2.5s/次（硬件 detect 1.1s + models show 1.0s + version 0.3s），任务内缓存后一轮一次 ⇒ **可接受，第 1 步不拆 `readiness()` 端口方法**（§9.3） |
 | O9 | **就绪状态的产物登记 kind**：`ocr` 是新增 kind，还是复用 `transcript` | 对外契约变更的幅度 | ✅ **已定（2026-11-11，用户确认）**：**新增 `ocr` kind**（D10），不复用 `transcript` |
+| O14 | **自动备资产的默认开关**：默认开（开箱可用，但会在用户机器上下 0.8–1.2GB）还是默认关（要用户显式开） | 磁盘 / 带宽 / 意外下载 | ⏳ **本轮拍板：默认开**（D12，`ocr.autoProvision: false` 可关）—— **待用户复核**；若觉得默认开太激进，改成默认关只是把配置默认值反过来，判定与执行的代码不变 |

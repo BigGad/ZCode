@@ -89,4 +89,31 @@ describe("loadOcrRuntimeSettings", () => {
     // ⚠️ 配置层只负责**如实读出**；「cloud 未实现 ⇒ 明确报错」是判定层的职责。
     expect(settings.degradation).toBe("cloud");
   });
+
+  it("defaults auto provisioning to on (第 2 步，D12)", async () => {
+    const workspace = await makeWorkspace({});
+    const settings = loadOcrRuntimeSettings(workspace, {
+      userConfigPath: await missingUserConfig(),
+    });
+
+    expect(settings.autoProvision).toBe(true);
+  });
+
+  it("reads autoProvision: false from the project config", async () => {
+    const workspace = await makeWorkspace({ ocr: { autoProvision: false } });
+    const settings = loadOcrRuntimeSettings(workspace, {
+      userConfigPath: await missingUserConfig(),
+    });
+
+    expect(settings.autoProvision).toBe(false);
+  });
+
+  it("project config wins over user config for autoProvision", async () => {
+    const userConfigPath = await makeUserConfig({ ocr: { autoProvision: false } });
+    const workspace = await makeWorkspace({ ocr: { autoProvision: true } });
+
+    const settings = loadOcrRuntimeSettings(workspace, { userConfigPath });
+
+    expect(settings.autoProvision).toBe(true);
+  });
 });

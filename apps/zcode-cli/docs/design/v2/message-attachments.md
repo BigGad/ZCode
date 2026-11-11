@@ -747,6 +747,7 @@ read 工具已具备（`pages` 参数），本节把同一能力接入附件解�
 | `modelInputFormat.supportsImage === true` 且 `PdfDocumentPort`、`ImageProcessorPort` 可用 | 页图 image blocks（≤20 页 + 尾注 text block），原始 file block 不投递 |
 | 否则 `supportsPdf === true` | 现状单 file block（media file block + dataUrl） |
 | 否则 `supportsImage === false` 且 `supportsPdf === false`，且本地解析引擎**已就位** | **本地 OCR 的 markdown 文本块**（见「PDF 本地 OCR 自动供给（2026-11-11）」） |
+| 否则 `supportsImage === false` 且 `supportsPdf === false`，引擎在但**模型权重未就位**，且 `ocr.autoProvision` 未关 | **先自动下载该档位权重，备好后继续走本地 OCR**（阻塞式；见「PDF 本地 OCR 自动供给（2026-11-11）」） |
 | 否则 `supportsImage === false` 且 `supportsPdf === false`，且本地解析引擎**不就位** | 明确错误文本（含装法 / 下载命令），不静默失败、不静默换路 |
 | 否则（能力位未知） | 现状 omit + 文本占位（`[PDF: source: <path>]`） |
 
@@ -765,6 +766,7 @@ read 工具已具备（`pages` 参数），本节把同一能力接入附件解�
 - **产物落点**：**会话级 artifact 目录**（`ToolArtifactStorePort.resolveSessionArtifactDir`），**不落在用户源文件旁**；拿不到该目录 ⇒ 放弃这条路并给明确错误文本，绝不退回源文件目录。
 - **登记**：OCR 产物在 workspace 资源索引里登记为 `kind: "ocr"` 的变体（不复用 `transcript` / `original`）。
 - **不就位**：按三层分别给出**确定的下一步** —— 缺引擎给装法（`uv tool install --python 3.12 "mineru>=4.0,<5"`），缺权重给 `zcode ocr models download --tier <t>`，体检失败给 `zcode ocr doctor`。
+- **自动备资产**（第 2 步，2026-11-11）：引擎已装但**模型权重未就位**时，ZCode **自动下载**该档位权重（走同一个 `LocalInfraPort.downloadModels`），**阻塞式**备好后继续解析当前这份文档；可用 `ocr.autoProvision: false` 关掉（关掉即回到上行的「明确错误 + 下一步」）。下载失败 ⇒ 明确错误文本（含引擎原因 + 手动下载命令），**不解析、不假装看到了文档**。
 - **不适用**：inline PDF（粘贴 / data URL）本轮不走这条路。
 
 ### 预算

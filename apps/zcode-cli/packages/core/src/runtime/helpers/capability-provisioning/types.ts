@@ -39,7 +39,9 @@ export type ProvisioningRuleId =
   | "rule-9"
   | "rule-10"
   | "rule-11"
-  | "rule-12";
+  | "rule-12"
+  | "rule-13"
+  | "rule-14";
 
 /** 规则表的输入维度：附件种类。 */
 export type ProvisioningAttachmentKind = "text" | "image" | "pdf";
@@ -79,6 +81,13 @@ export interface ProvisioningDecision {
   readonly readiness?: LocalReadinessProjection;
   /** 人话理由（一行）。 */
   readonly reason: string;
+  /**
+   * **执行前要先备资产**（第 2 步，仅 rule-13 为 `true`）。
+   *
+   * ⚠️ 判定只说「走本地引擎」；**备资产是执行阶段的事**（下载权重可能要几分钟）——
+   * 执行方据此先调 `downloadModels`，成功后再解析。
+   */
+  readonly requiresProvisioning?: boolean;
 }
 
 /**
@@ -89,6 +98,12 @@ export interface ProvisioningDecision {
 export interface LocalInfraProvisioning {
   readonly port: LocalInfraPort;
   readonly degradation: DegradationPolicy;
+  /**
+   * **未就位时自动备资产**（第 2 步，D12，默认 `true`）。
+   *
+   * ⚠️ 关掉（`ocr.autoProvision: false`）就回到第 1 步：明确报错 + 手动下载命令。
+   */
+  readonly autoProvision: boolean;
   /** 就绪状态（任务内缓存 —— 探测会 spawn 子进程，同一轮里只付一次）。 */
   readonly resolveReadiness: () => Promise<LocalReadinessProjection | undefined>;
 }

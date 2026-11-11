@@ -301,6 +301,13 @@ export interface OcrRuntimeConfig {
    * ⚠️ 默认 `error`；`cloud` 是**预留成员**，v1 配了会明确报错，不会悄悄按 `error` 执行。
    */
   degradation?: DegradationPolicy;
+  /**
+   * 未就位时是否自动备资产（第 2 步，spec：docs/design/v2/capability-provisioning.md §5.2 / D12）。
+   *
+   * ⚠️ 默认 `true`：第 ③ 层（模型权重）可以用现成的 `mineru-kit models download` 备。
+   * ⚠️ 配成 `false` 就回到第 1 步的行为：明确报错 + 给出手动下载命令。
+   */
+  autoProvision?: boolean;
 }
 
 export type SupportedLocale = "en-US" | "zh-CN";

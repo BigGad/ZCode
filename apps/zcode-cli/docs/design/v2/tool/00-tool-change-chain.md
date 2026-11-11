@@ -2211,3 +2211,14 @@ artifact store 拥有，业务层不重算），**不落在用户源文件旁**�
 权限规则与链路第 5/6 步（调度、UI 投递）不受影响；详见
 [capability-provisioning.md](../capability-provisioning.md) 与
 [message-attachments.md](../message-attachments.md) 同日章节。
+
+### 自动备资产（2026-11-11，第 2 步）
+
+判定命中「模型既不支持 PDF 也不支持图片 + 引擎已装但**模型权重未就位**」时，判定层多一行
+（rule-13）：路线仍是本地引擎，但**执行前要先备资产** —— 走同一个 `LocalInfraPort.downloadModels`
+（不新增端口方法）下载该档位权重，**阻塞式**（D13）备好后继续解析当前这份文档。备资产失败 ⇒
+明确错误文本（含引擎原因 + 手动下载命令），**不解析、不假装看到了文档**（rule-14）。
+`ocr.autoProvision: false` 可关掉（回到「明确报错 + 下一步」）。取消信号与下载预算透传到端口
+（`LocalModelsDownloadRequest` 新增**可选**的 `signal?` / `timeoutMs?`；端口方法集合不变）。
+契约改动：`AgentRuntimeDeps` 新增 `localInfraAutoProvision?`；`ocrConfigSchema` 新增
+`autoProvision` 键（默认 `true`）。工具 schema、description、权限规则与链路第 5/6 步不受影响。

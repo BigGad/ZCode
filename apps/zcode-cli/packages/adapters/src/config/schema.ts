@@ -68,6 +68,14 @@ export const ocrConfigSchema = z
      * ⚠️ `cloud` 是**预留成员**，v1 未实现 —— 配了会**明确报错**，不会悄悄按 `error` 执行。
      */
     degradation: z.enum(["error", "cloud"]).optional(),
+    /**
+     * 自动备资产（第 2 步，spec：capability-provisioning.md §5.2 / D12）。
+     *
+     * ⚠️ 默认 `true`（开箱可用）：引擎已装但模型权重没下时，ZCode 自己下载。
+     * ⚠️ 权重是 0.8–1.2GB 量级 —— 不想让它自动下就显式关成 `false`，
+     * 行为回到「明确报错 + 给出手动下载命令」。
+     */
+    autoProvision: z.boolean().optional(),
   })
   .strict();
 

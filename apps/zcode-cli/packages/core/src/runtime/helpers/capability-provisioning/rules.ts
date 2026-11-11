@@ -25,6 +25,8 @@ export interface ProvisioningRuleContext {
   readonly attachmentKind: ProvisioningAttachmentKind;
   readonly modelInputFormat?: ModelInputFormat;
   readonly degradation: DegradationPolicy;
+  /** 未就位时是否**自动备资产**（第 2 步，配置键 `ocr.autoProvision`，默认 `true`）。 */
+  readonly autoProvision: boolean;
   /** 就绪状态（任务内缓存，跨进程不缓存）。 */
   readonly readiness: () => Promise<LocalReadinessProjection | undefined>;
 }
@@ -39,6 +41,12 @@ export interface ProvisioningRule {
   readonly matches: (context: ProvisioningRuleContext) => boolean | Promise<boolean>;
   /** 人话理由（一行）。 */
   readonly reason: string | ((readiness: LocalReadinessProjection | undefined) => string);
+  /**
+   * 命中后**执行前要先备资产**（第 2 步）。
+   *
+   * ⚠️ 判定与执行分开：判定只说「走本地引擎」，备资产（下载权重）是执行阶段的事。
+   */
+  readonly requiresProvisioning?: boolean;
 }
 
 /** 阶段顺序：能力位 → 就绪状态 → 兜底。 */
@@ -124,6 +132,24 @@ export const PROVISIONING_RULES: readonly ProvisioningRule[] = [
     reason: "模型既不支持 PDF 也不支持图片，但本地解析引擎不可用。",
   },
   {
+    id: "rule-13",
+    attachmentKind: "pdf",
+    stage: "readiness",
+    route: "local-engine",
+    // ⚠️ **判在 rule-8 之前**：两者都是「第 ③ 层不就位」，
+    // 区别只在**能不能自己搞定**（自动备开关开着 + 该档位有仓库映射）。
+    matches: async (context) => {
+      if (!isLocalEngineCandidate(context)) return false;
+      if (!context.autoProvision) return false;
+      const readiness = await context.readiness();
+      if (readiness?.status !== "not-ready") return false;
+      // 没有可执行的下载命令 ⇒ 备不了（档位没有仓库映射）⇒ 交给 rule-8 报错。
+      return readiness.downloadCommand !== undefined;
+    },
+    reason: "模型既不支持 PDF 也不支持图片，本地模型尚未就绪，先自动备资产再解析。",
+    requiresProvisioning: true,
+  },
+  {
     id: "rule-8",
     attachmentKind: "pdf",
     stage: "readiness",
@@ -172,6 +198,8 @@ export async function decideProvisioning(input: {
   readonly attachmentKind: ProvisioningAttachmentKind;
   readonly modelInputFormat?: ModelInputFormat;
   readonly degradation: DegradationPolicy;
+  /** 未就位时是否自动备资产（第 2 步；配置键 `ocr.autoProvision`）。 */
+  readonly autoProvision: boolean;
   readonly resolveReadiness?: () => Promise<LocalReadinessProjection | undefined>;
 }): Promise<ProvisioningDecision> {
   let readinessPromise: Promise<LocalReadinessProjection | undefined> | undefined;
@@ -189,6 +217,7 @@ export async function decideProvisioning(input: {
     attachmentKind: input.attachmentKind,
     ...(input.modelInputFormat !== undefined ? { modelInputFormat: input.modelInputFormat } : {}),
     degradation: input.degradation,
+    autoProvision: input.autoProvision,
     // 懒取 + 记忆化：探测成本只付一次，且只有真正需要的规则才会触发。
     readiness: () => {
       readinessPromise ??= input.resolveReadiness?.() ?? Promise.resolve(undefined);
@@ -207,6 +236,7 @@ export async function decideProvisioning(input: {
         route: rule.route,
         degradation: input.degradation,
         ...(readiness !== undefined ? { readiness } : {}),
+        ...(rule.requiresProvisioning === true ? { requiresProvisioning: true } : {}),
         reason: resolveReason(rule.reason, readiness),
       };
     }

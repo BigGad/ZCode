@@ -386,10 +386,14 @@ class LocalInfraAdapter implements LocalInfraPort {
       {
         executable: located.engine.path,
         args,
-        timeoutMs: MODELS_DOWNLOAD_TIMEOUT_MS,
+        // ⚠️ 预算可被调用方覆盖（第 2 步的自动路线会传自己的上限）；
+        // 缺省沿用端口的 60 分钟上限 —— 权重是 0.8–1.2GB 量级。
+        timeoutMs: request.timeoutMs ?? MODELS_DOWNLOAD_TIMEOUT_MS,
         stripProxy: proxyPolicy === "strip",
       },
       this.deps.execution,
+      // ⚠️ 取消透传：用户取消任务时，正在下载的权重要一起停。
+      request.signal,
     );
 
     if (run.timedOut) {

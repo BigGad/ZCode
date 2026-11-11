@@ -389,6 +389,11 @@ export interface AgentRuntimeDeps {
    * ⚠️ `cloud` 在 v1 未实现 —— 配了会**明确报错**，不会悄悄按 `error` 执行。
    */
   localInfraDegradation?: DegradationPolicy;
+  /**
+   * 未就位时是否自动备资产（第 2 步，配置键 `ocr.autoProvision`，默认 `true`）。
+   * ⚠️ 关掉后走既有「未就位 ⇒ 明确报错」路线（rule-8），不会静默降级。
+   */
+  localInfraAutoProvision?: boolean;
   /** CLI 无头注入的全局 PDF 密码（--pdf-password）；仅密码装饰器消费，不落盘不进日志。 */
   pdfPassword?: string;
   workspaceResourceIndexPort?: WorkspaceResourceIndexPort;

@@ -1,6 +1,7 @@
 import { VIDEO_INPUT_MAX_BYTES } from "@zcode/contracts";
 import type {
   ImageProcessorPort,
+  Logger,
   ModelInputFormat,
   PdfDocumentPort,
   SessionId,
@@ -37,6 +38,11 @@ export interface InlineMediaResolverOptions {
   turnId?: TurnId;
   workspaceKey?: string;
   workspaceResourceIndexPort?: WorkspaceResourceIndexPort;
+  /**
+   * 运行期日志（第 2 步的自动备资产要报「开始下载 / 下载完成」——
+   * 权重 0.8–1.2GB，阻塞期间没有提示用户会以为卡死）。
+   */
+  logger?: Logger;
 }
 
 export async function resolveInlineMediaAttachment(

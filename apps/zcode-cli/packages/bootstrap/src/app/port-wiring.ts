@@ -72,6 +72,8 @@ export interface WiredPorts {
   localInfraPort: LocalInfraPort;
   /** 能力不可用时的降级策略（默认 `error`）。 */
   localInfraDegradation: DegradationPolicy;
+  /** 未就位时是否自动备资产（默认 `true`；配置键 `ocr.autoProvision`）。 */
+  localInfraAutoProvision: boolean;
 }
 
 export function wirePorts(context: WirePortsContext): WiredPorts {
@@ -233,5 +235,6 @@ export function wirePorts(context: WirePortsContext): WiredPorts {
     workspaceResourceIndexPort,
     localInfraPort,
     localInfraDegradation: ocrSettings.degradation,
+    localInfraAutoProvision: ocrSettings.autoProvision,
   };
 }

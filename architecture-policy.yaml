@@ -1624,5 +1624,6 @@ exceptions:
       - apps/zcode-cli/packages/core/src/runtime/helpers/capability-provisioning/readiness.ts
       - apps/zcode-cli/packages/core/src/runtime/helpers/capability-provisioning/local-ocr.ts
       - apps/zcode-cli/packages/core/src/runtime/helpers/capability-provisioning/projection.ts
+      - apps/zcode-cli/packages/core/src/runtime/helpers/capability-provisioning/assets.ts
       - apps/zcode-cli/packages/core/src/runtime/methods/capability-provisioning.ts
-    reason: 能力按需供给层（2026-11-11，spec：apps/zcode-cli/docs/design/v2/capability-provisioning.md 第 1 步）。各文件单一所有者：adapters 的 config/ocr-config.ts 是 `ocr.*` 配置段的**唯一**读取入口（命令面与 runtime 共用同一份引擎路径与降级策略）；core 的 helpers/capability-provisioning/* 是判定层（静态规则表 + 就绪投影 + 引擎调用 + 模型可见文本投影），methods/capability-provisioning.ts 只把 runtime 的端口/策略装配成供给上下文。依赖方向 contracts ← adapters ← core 未变；core 不 import adapters（MINERU_INSTALL_HINT 等常量落在 contracts）。本层不改既有模块边界，接管整个 contracts/adapters/core 包不在本次范围内。
+    reason: 能力按需供给层（2026-11-11，spec：apps/zcode-cli/docs/design/v2/capability-provisioning.md 第 1 / 2 步）。各文件单一所有者：adapters 的 config/ocr-config.ts 是 `ocr.*` 配置段的**唯一**读取入口（命令面与 runtime 共用同一份引擎路径、降级策略与自动备资产开关）；core 的 helpers/capability-provisioning/* 是判定层（静态规则表 + 就绪投影 + 引擎调用 + 模型可见文本投影 + 自动备资产），methods/capability-provisioning.ts 只把 runtime 的端口/策略装配成供给上下文。依赖方向 contracts ← adapters ← core 未变；core 不 import adapters（MINERU_INSTALL_HINT 等常量落在 contracts）。本层不改既有模块边界，接管整个 contracts/adapters/core 包不在本次范围内。

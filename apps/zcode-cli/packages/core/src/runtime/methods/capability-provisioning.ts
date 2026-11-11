@@ -18,6 +18,9 @@ export function resolveLocalInfraProvisioning(
   return {
     port,
     degradation: runtime.localInfraDegradation,
+    // ⚠️ **默认开**（第 2 步，D12）：端口装配了就允许自动备资产；
+    // 关掉只能靠配置 `ocr.autoProvision: false`（装配层已经读好了）。
+    autoProvision: runtime.localInfraAutoProvision ?? true,
     resolveReadiness: () =>
       resolveLocalInfraReadiness({
         cache: runtime.localInfraReadinessCache,

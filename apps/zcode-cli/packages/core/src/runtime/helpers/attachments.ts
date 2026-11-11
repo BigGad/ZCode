@@ -4,6 +4,7 @@ import type {
   FilePartSource,
   FileSystemPort,
   ImageProcessorPort,
+  Logger,
   ModelInputFormat,
   PdfDocumentPort,
   SessionId,
@@ -49,6 +50,8 @@ type ResolveAttachmentOptions = {
   pdfDocumentPort?: PdfDocumentPort;
   /** 能力供给层（本地 OCR）；缺席即不做供给。 */
   localInfra?: LocalInfraProvisioning;
+  /** 运行期日志（第 2 步的自动备资产要报进度）。 */
+  logger?: Logger;
   sessionId?: SessionId;
   traceContext: TraceContext;
   turnId?: TurnId;

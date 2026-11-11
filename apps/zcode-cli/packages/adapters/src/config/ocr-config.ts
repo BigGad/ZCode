@@ -8,6 +8,15 @@ import { loadFileConfig } from "./file-config.adapter.js";
 import { loadProjectConfigs } from "./project-config.adapter.js";
 
 /**
+ * 自动备资产的默认值（第 2 步，D12）。
+ *
+ * ⚠️ 默认**开**：产品承诺是「ZCode 自己把能力拉起来，用户不感知命令」，
+ * 而第 ③ 层（模型权重）完全可以用现成的 `mineru-kit models download` 备。
+ * 关掉它（`ocr.autoProvision: false`）就回到第 1 步的行为。
+ */
+export const DEFAULT_AUTO_PROVISION = true;
+
+/**
  * `ocr.*` 配置段的运行期视图（spec：docs/design/v2/capability-provisioning.md §8.2）。
  *
  * ⚠️ **机器级**（不是 workspace 级）：就绪状态是「这台机器上能不能用」，
@@ -18,6 +27,13 @@ export interface OcrRuntimeSettings {
   readonly infra: LocalInfraConfig;
   /** 降级策略（默认 `error`）。 */
   readonly degradation: DegradationPolicy;
+  /**
+   * 自动备资产（第 2 步，默认 `true`）。
+   *
+   * ⚠️ 权重是 0.8–1.2GB 量级 ⇒ 默认开意味着**用户机器上会真的下东西**；
+   * 关掉（`ocr.autoProvision: false`）就回到「明确报错 + 手动下载命令」。
+   */
+  readonly autoProvision: boolean;
 }
 
 /**
@@ -42,6 +58,7 @@ export function loadOcrRuntimeSettings(
 
   let infra: LocalInfraConfig = {};
   let degradation: DegradationPolicy = DEFAULT_DEGRADATION_POLICY;
+  let autoProvision = DEFAULT_AUTO_PROVISION;
   for (const layer of [user.config.ocr, ...project.files.map((file) => file.config.ocr)]) {
     if (layer === undefined) continue;
     infra = {
@@ -50,6 +67,7 @@ export function loadOcrRuntimeSettings(
       ...(layer.mineruProxy !== undefined ? { mineruProxy: layer.mineruProxy } : {}),
     };
     if (layer.degradation !== undefined) degradation = layer.degradation;
+    if (layer.autoProvision !== undefined) autoProvision = layer.autoProvision;
   }
-  return { infra, degradation };
+  return { infra, degradation, autoProvision };
 }

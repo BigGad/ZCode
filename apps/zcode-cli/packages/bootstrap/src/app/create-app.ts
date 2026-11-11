@@ -434,6 +434,7 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       workspaceResourceIndexPort,
       localInfraPort,
       localInfraDegradation,
+      localInfraAutoProvision,
     } = wiredPorts;
     markMcpAdapterInitialized({
       configuredMcpServers,
@@ -848,6 +849,7 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       // 自动走本机解析引擎。端口缺席即不做供给，附件链维持既有行为。
       localInfraPort,
       localInfraDegradation,
+      localInfraAutoProvision,
       // CLI --pdf-password：无头场景密码 PDF 的非交互解锁来源（message-attachments.md）。
       pdfPassword: options.pdfPassword,
       workspaceResourceIndexPort,

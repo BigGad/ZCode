@@ -159,6 +159,8 @@ export interface AgentRuntimeInternal
   localInfraPort?: LocalInfraPort;
   /** 能力不可用时的降级策略（默认 `error`）。 */
   localInfraDegradation: DegradationPolicy;
+  /** 未就位时是否自动备资产（第 2 步，默认 `true`；配置键 `ocr.autoProvision`）。 */
+  localInfraAutoProvision: boolean;
   /** 能力供给层的就绪状态缓存（同一轮任务内只探测一次；跨轮不缓存）。 */
   localInfraReadinessCache: LocalInfraReadinessCache;
   /** PDF 解锁密码内存缓存（密码统一通道唯一所有者，生命周期 = runtime，从不落盘）。 */

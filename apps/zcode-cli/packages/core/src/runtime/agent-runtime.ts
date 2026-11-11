@@ -255,6 +255,8 @@ export class AgentRuntime {
   private localInfraPort?: LocalInfraPort;
   /** 能力不可用时的降级策略（默认 `error`）。 */
   private localInfraDegradation: DegradationPolicy = DEFAULT_DEGRADATION_POLICY;
+  /** 未就位时是否自动备资产（第 2 步，默认 `true`；配置键 `ocr.autoProvision`）。 */
+  private localInfraAutoProvision = true;
   /** 能力供给层的就绪状态缓存（同一轮任务内只探测一次；跨轮不缓存）。 */
   private localInfraReadinessCache: LocalInfraReadinessCache = {};
   private workspaceResourceIndexPort?: WorkspaceResourceIndexPort;
@@ -411,6 +413,7 @@ export class AgentRuntime {
     // 端口缺席 ⇒ 附件链不做能力供给（既有行为不变）。
     this.localInfraPort = deps.localInfraPort;
     this.localInfraDegradation = deps.localInfraDegradation ?? DEFAULT_DEGRADATION_POLICY;
+    this.localInfraAutoProvision = deps.localInfraAutoProvision ?? true;
     this.liveCapturePort = deps.liveCapturePort;
     this.videoFramePort = deps.videoFramePort;
     this.subagentPort = deps.subagentPort ?? runtime.createDefaultSubagentPort(deps);

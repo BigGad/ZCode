@@ -101,10 +101,12 @@ function fakeLocalInfraPort(input: {
   report?: LocalInfraDoctorReport;
   parseResult?: LocalParseResult;
   doctorError?: Error;
+  downloadError?: { readonly code: string; readonly message: string };
 }): {
   port: LocalInfraPort;
   doctor: ReturnType<typeof vi.fn>;
   parse: ReturnType<typeof vi.fn>;
+  downloadModels: ReturnType<typeof vi.fn>;
 } {
   const doctor = vi.fn(async () => {
     if (input.doctorError) throw input.doctorError;
@@ -121,8 +123,26 @@ function fakeLocalInfraPort(input: {
         durationMs: 1200,
       },
   );
-  const port = { doctor, parse } as unknown as LocalInfraPort;
-  return { port, doctor, parse };
+  const downloadModels = vi.fn(async () =>
+    input.downloadError !== undefined
+      ? {
+          ok: false,
+          engine: "mineru" as const,
+          tier: "basic" as const,
+          error: { code: "process_failed" as const, message: input.downloadError.message },
+          warnings: [],
+          durationMs: 42,
+        }
+      : {
+          ok: true,
+          engine: "mineru" as const,
+          tier: "basic" as const,
+          warnings: [],
+          durationMs: 1200,
+        },
+  );
+  const port = { doctor, parse, downloadModels } as unknown as LocalInfraPort;
+  return { port, doctor, parse, downloadModels };
 }
 
 function fakeFileSystemPort(hash = "sha256:aaaa"): FileSystemPort & {
@@ -226,11 +246,14 @@ function fakeImageProcessorPort(): ImageProcessorPort {
 function localInfra(input: {
   port: LocalInfraPort;
   degradation?: "error" | "cloud";
+  /** 第 2 步：未就位时是否自动备资产（默认开）。 */
+  autoProvision?: boolean;
   readiness?: () => Promise<ReturnType<typeof projectLocalReadiness> | undefined>;
 }): LocalInfraProvisioning {
   return {
     port: input.port,
     degradation: input.degradation ?? "error",
+    autoProvision: input.autoProvision ?? true,
     resolveReadiness:
       input.readiness ?? (async () => projectLocalReadiness(await input.port.doctor())),
   };
@@ -304,6 +327,7 @@ describe("能力供给层：判定规则（A8 / A7）", () => {
       attachmentKind: "pdf",
       modelInputFormat: noVisionFormat(),
       degradation: "error",
+      autoProvision: true,
       resolveReadiness: async () => projectLocalReadiness(readyReport()),
     });
     expect(decision.ruleId).toBe("rule-6");
@@ -317,6 +341,7 @@ describe("能力供给层：判定规则（A8 / A7）", () => {
       attachmentKind: "pdf",
       modelInputFormat: noVisionFormat(),
       degradation: "cloud",
+      autoProvision: true,
       resolveReadiness: async () => projectLocalReadiness(readyReport()),
     });
     expect(decision.ruleId).toBe("rule-11");
@@ -329,6 +354,7 @@ describe("能力供给层：判定规则（A8 / A7）", () => {
       attachmentKind: "pdf",
       modelInputFormat: { supportsText: true },
       degradation: "error",
+      autoProvision: true,
       resolveReadiness: async () => projectLocalReadiness(readyReport()),
     });
     expect(decision.ruleId).toBe("rule-10");
@@ -340,9 +366,78 @@ describe("能力供给层：判定规则（A8 / A7）", () => {
       attachmentKind: "pdf",
       modelInputFormat: noVisionFormat(),
       degradation: "error",
+      autoProvision: true,
     });
     expect(decision.ruleId).toBe("rule-10");
     expect(decision.route).toBe("existing");
+  });
+});
+
+describe("能力供给层：自动备资产（第 2 步，D12/D13）", () => {
+  it("模型未就位 + 自动备开关开 ⇒ rule-13（先备资产再解析）", async () => {
+    const decision = await decideProvisioning({
+      attachmentKind: "pdf",
+      modelInputFormat: noVisionFormat(),
+      degradation: "error",
+      autoProvision: true,
+      resolveReadiness: async () => projectLocalReadiness(notReadyReport()),
+    });
+    expect(decision.ruleId).toBe("rule-13");
+    expect(decision.route).toBe("local-engine");
+    expect(decision.requiresProvisioning).toBe(true);
+  });
+
+  it("模型未就位 + 自动备开关关 ⇒ rule-8（明确报错，不偷偷下权重）", async () => {
+    const decision = await decideProvisioning({
+      attachmentKind: "pdf",
+      modelInputFormat: noVisionFormat(),
+      degradation: "error",
+      autoProvision: false,
+      resolveReadiness: async () => projectLocalReadiness(notReadyReport()),
+    });
+    expect(decision.ruleId).toBe("rule-8");
+    expect(decision.route).toBe("error");
+    expect(decision.requiresProvisioning).toBeUndefined();
+  });
+
+  it("模型未就位 + 自动备开关开 ⇒ 先下载权重再解析，下载成功才有 markdown", async () => {
+    const { port, parse, downloadModels } = fakeLocalInfraPort({ report: notReadyReport() });
+    const { resolved } = await resolvePdf({ localInfra: localInfra({ port }) });
+
+    expect(downloadModels).toHaveBeenCalledTimes(1);
+    expect(downloadModels.mock.calls[0]![0].tier).toBe("basic");
+    expect(parse).toHaveBeenCalledTimes(1);
+    expect(resolved?.contentBlock.type).toBe("text");
+    const text = (resolved?.contentBlock as { text: string }).text;
+    expect(text).toContain(MARKDOWN);
+  });
+
+  it("自动备资产失败 ⇒ 明确报错（rule-14）+ 不解析，不假装看到了文档", async () => {
+    const { port, parse, downloadModels } = fakeLocalInfraPort({
+      report: notReadyReport(),
+      downloadError: { code: "process_failed", message: "下载中断" },
+    });
+    const { resolved } = await resolvePdf({ localInfra: localInfra({ port }) });
+
+    expect(downloadModels).toHaveBeenCalledTimes(1);
+    expect(parse).not.toHaveBeenCalled();
+    expect(resolved?.contentBlock.type).toBe("text");
+    const text = (resolved?.contentBlock as { text: string }).text;
+    expect(text).toContain("rule: rule-14");
+    expect(text).toContain("下载中断");
+  });
+
+  it("自动备开关关 ⇒ 不下载权重，明确报错并给手动下载命令", async () => {
+    const { port, parse, downloadModels } = fakeLocalInfraPort({ report: notReadyReport() });
+    const { resolved } = await resolvePdf({
+      localInfra: localInfra({ port, autoProvision: false }),
+    });
+
+    expect(downloadModels).not.toHaveBeenCalled();
+    expect(parse).not.toHaveBeenCalled();
+    const text = (resolved?.contentBlock as { text: string }).text;
+    expect(text).toContain("rule: rule-8");
+    expect(text).toContain("zcode ocr models download --tier basic");
   });
 });
 
@@ -400,13 +495,15 @@ describe("能力供给层：附件链（A2–A6）", () => {
     expect(text).toContain("Next step:");
   });
 
-  it("A4：模型未就位 ⇒ 明确报错 + 确切下载命令", async () => {
-    const { port, parse } = fakeLocalInfraPort({ report: notReadyReport() });
+  it("A4：模型未就位 ⇒ 第 2 步起自动备资产；备不好才报错 + 确切下载命令", async () => {
+    const { port, parse, downloadModels } = fakeLocalInfraPort({ report: notReadyReport() });
     const { resolved } = await resolvePdf({ localInfra: localInfra({ port }) });
 
-    expect(parse).not.toHaveBeenCalled();
+    // 自动备资产（默认开）：先下权重，再解析。
+    expect(downloadModels).toHaveBeenCalledTimes(1);
+    expect(parse).toHaveBeenCalledTimes(1);
     const text = (resolved?.contentBlock as { text: string }).text;
-    expect(text).toContain("zcode ocr models download --tier basic");
+    expect(text).toContain(MARKDOWN);
   });
 
   it("A5：模型有视觉能力 ⇒ 走现有页图渲染路线（行为不变），不碰本地引擎", async () => {

@@ -216,6 +216,18 @@ export interface LocalModelsDownloadRequest {
   readonly tier: "basic" | "standard";
   /** 模型源（默认交给 MinerU 自己判断）。 */
   readonly source?: "auto" | "huggingface" | "modelscope";
+  /**
+   * 取消信号（第 2 步：自动备资产是阻塞的，用户取消任务时下载必须一起停）。
+   *
+   * ⚠️ **可选**：命令面（`zcode ocr models download`）不传，runtime 的自动路线传。
+   */
+  readonly signal?: AbortSignal;
+  /**
+   * 下载预算（毫秒）。缺省用端口自己的上限（60 分钟）。
+   *
+   * ⚠️ 只在**调用方明确知道自己在等什么**时覆盖 —— 权重是 0.8–1.2GB 量级。
+   */
+  readonly timeoutMs?: number;
 }
 
 export interface LocalModelsDownloadResult {

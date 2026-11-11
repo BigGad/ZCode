@@ -8,7 +8,7 @@ import type {
   ExecutionResult,
   PdfDocumentPort,
 } from "@zcode/contracts";
-import { createLocalInfraPort } from "../../src/local-infra/index.js";
+import { createLocalInfraPort, MODELS_DOWNLOAD_TIMEOUT_MS } from "../../src/local-infra/index.js";
 import { createNodeFileSystemAdapter } from "../../src/fs/index.js";
 import {
   argvOf,
@@ -482,5 +482,53 @@ describe("本地基础设施端口 —— models download", () => {
       (call) => argvOf(call)[0] === "models" && argvOf(call)[1] === "download",
     );
     expect(downloadCall?.env?.unset ?? []).toEqual([]);
+  });
+
+  it("下载请求把超时预算与取消信号透传给执行端口（第 2 步的自动路线）", async () => {
+    const root = await mkdtemp(join(tmpdir(), "zcode-local-infra-"));
+    roots.push(root);
+    const kitPath = await createFakeEngine(root);
+    const controller = new AbortController();
+    const seen: { timeoutMs?: number; signal?: AbortSignal }[] = [];
+    const execution = {
+      async run(request: ExecutionRequest, options?: { signal?: AbortSignal }) {
+        seen.push({
+          ...(request.timeoutMs !== undefined ? { timeoutMs: request.timeoutMs } : {}),
+          ...(options?.signal !== undefined ? { signal: options.signal } : {}),
+        });
+        return completedResult({ stdout: "已下载 3 个仓库。\n" });
+      },
+    } as unknown as ExecutionPort;
+    const port = createLocalInfraPort({
+      execution,
+      fileSystem: createNodeFileSystemAdapter(),
+      config: { mineruPath: kitPath },
+    });
+
+    await port.downloadModels({ tier: "basic", timeoutMs: 1234, signal: controller.signal });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.timeoutMs).toBe(1234);
+    // ⚠️ 取消必须透传：用户取消任务时，正在下载的权重要一起停。
+    expect(seen[0]?.signal).toBe(controller.signal);
+  });
+
+  it("下载请求不给预算时沿用端口的默认上限", async () => {
+    const root = await mkdtemp(join(tmpdir(), "zcode-local-infra-"));
+    roots.push(root);
+    const kitPath = await createFakeEngine(root);
+    const execution = fakeExecutionPort(engineHandler());
+    const port = createLocalInfraPort({
+      execution,
+      fileSystem: createNodeFileSystemAdapter(),
+      config: { mineruPath: kitPath },
+    });
+
+    await port.downloadModels({ tier: "basic" });
+
+    const downloadCall = execution.calls.find(
+      (call) => argvOf(call)[0] === "models" && argvOf(call)[1] === "download",
+    );
+    expect(downloadCall?.timeoutMs).toBe(MODELS_DOWNLOAD_TIMEOUT_MS);
   });
 });

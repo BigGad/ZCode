@@ -3,6 +3,7 @@ import { basename, isFileSystemPortError, resolvePath } from "../deps.js";
 import type {
   FilePartSource,
   FileSystemPort,
+  MineruTier,
   TurnAttachment,
 } from "../deps.js";
 import { INLINE_MEDIA_ATTACHMENT_MAX_BYTES } from "../types.js";
@@ -19,9 +20,14 @@ import {
   buildLocalOcrFailureText,
   buildLocalOcrText,
   decideProvisioning,
+  provisionLocalAssets,
   provisionLocalOcr,
 } from "./capability-provisioning/index.js";
-import type { LocalInfraProvisioning } from "./capability-provisioning/index.js";
+import type {
+  LocalInfraProvisioning,
+  ProvisionableTier,
+  ProvisioningDecision,
+} from "./capability-provisioning/index.js";
 import type { InlineMediaResolverOptions } from "./inline-media-resolver.js";
 
 export interface LocalMediaResolverOptions extends Omit<
@@ -213,6 +219,7 @@ async function resolveLocalPdfByOcr(
       ? { modelInputFormat: options.modelInputFormat }
       : {}),
     degradation: localInfra.degradation,
+    autoProvision: localInfra.autoProvision,
     resolveReadiness: localInfra.resolveReadiness,
   });
   if (decision.route === "existing") return undefined;
@@ -224,6 +231,12 @@ async function resolveLocalPdfByOcr(
       text,
       bytes: Buffer.byteLength(text, "utf8"),
     });
+  }
+
+  // 第 2 步：判定要求**先备资产再解析**（模型权重没下 ⇒ 自动下载）。
+  if (decision.requiresProvisioning === true) {
+    const prepared = await prepareLocalAssets(context, decision);
+    if (prepared !== undefined) return prepared;
   }
 
   // 本地引擎路线：产物必须落**会话级 artifact 目录**（D9），不得落在用户源文件旁。
@@ -292,6 +305,66 @@ async function resolveLocalPdfByOcr(
     text,
     bytes: Buffer.byteLength(text, "utf8"),
   });
+}
+
+/**
+ * 第 2 步：自动备资产（下载模型权重）。
+ *
+ * ⚠️ **失败就是明确报错**（rule-14）+ 手动下载命令 —— 绝不静默降级：
+ * 「模型没看到这份文档却像看到了」比报错更糟（D13）。
+ * ⚠️ 返回 `undefined` = 备好了，继续解析。
+ */
+async function prepareLocalAssets(
+  context: LocalMediaContext,
+  decision: ProvisioningDecision,
+): Promise<ResolvedTurnAttachment | undefined> {
+  const { filename, options } = context;
+  const localInfra = options.localInfra;
+  if (localInfra === undefined) return undefined;
+  const tier = resolveProvisionableTier(decision.readiness?.tier);
+  if (tier === undefined) {
+    // ⚠️ 不该发生：rule-13 要求该档位有可执行的下载命令（= basic / standard）。
+    // 真发生了就当「备不了」⇒ 明确报错，不猜。
+    const failureDecision = {
+      ...decision,
+      route: "error" as const,
+      ruleId: "rule-14" as const,
+      reason: "本地模型档位无法自动备（该档位没有可执行的下载命令）。",
+    };
+    const text = buildLocalOcrFailureText({ filename, decision: failureDecision });
+    return resolvedOcrTextAttachment(context, {
+      text,
+      bytes: Buffer.byteLength(text, "utf8"),
+    });
+  }
+  const outcome = await provisionLocalAssets({
+    port: localInfra.port,
+    tier,
+    ...(options.abortSignal !== undefined ? { signal: options.abortSignal } : {}),
+    ...(options.logger !== undefined ? { logger: options.logger } : {}),
+  });
+  if (outcome.ok) return undefined;
+  const failureDecision = {
+    ...decision,
+    route: "error" as const,
+    ruleId: "rule-14" as const,
+    reason: "本地模型权重未能自动下载完成。",
+  };
+  const text = buildLocalOcrFailureText({
+    filename,
+    decision: failureDecision,
+    failure: outcome.failure,
+  });
+  return resolvedOcrTextAttachment(context, {
+    text,
+    bytes: Buffer.byteLength(text, "utf8"),
+  });
+}
+
+/** 能自动下载的档位（MinerU 的 `models download --tier` 只接受 basic / standard）。 */
+function resolveProvisionableTier(tier: MineruTier | undefined): ProvisionableTier | undefined {
+  if (tier === "basic" || tier === "standard") return tier;
+  return undefined;
 }
 
 /**

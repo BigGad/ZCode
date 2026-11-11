@@ -1265,6 +1265,8 @@ async function drainPendingInputUnlocked(
       pdfDocumentPort: this.pdfDocumentPort,
       // 能力供给层：模型既不支持图片也不支持 PDF 时走本地 OCR（capability-provisioning.md）。
       localInfra: resolveLocalInfraProvisioning(this, options.activeTurn.turnId),
+      // 自动备资产要报进度（权重 0.8–1.2GB，阻塞期间没有提示会以为卡死）。
+      logger: this.logger,
       sessionId: this.sessionId,
       traceContext: inputTraceContext,
       turnId: options.activeTurn.turnId,
