@@ -227,6 +227,17 @@ export function createCapabilityRegistry(): CapabilityRegistry;
 
 ### 4.2 投影 A — CLI
 
+> ⚠️⚠️ **2026-11-12 已被 [`capability-cli-blocks.md`](./capability-cli-blocks.md) 取代（§4.2 全部内容）**。
+>
+> **用户拍板**：**CLI 是交给业务调用的积木**，业务拿原子命令自己封装场景逻辑 ⇒ **投影 A 不是 `zcode cap run` 通用执行面，而是族命令组**（`zcode ocr inspect` / `zcode ocr parse` / …）。理由与完整形态见新 spec 的 D1 / D4。
+>
+> - ⛔ **不实现** `zcode cap list` / `zcode cap describe` / `zcode cap run`；
+> - ✅ **沿用**本 spec 的 §3 能力契约、§7 退出码与错误码闭集、§8 输出信封（业务要写一套解析器，这三样是对外公共契约）；
+> - ✅ **沿用** §4.1 注册表与 §4.5「三投影共用一份实现」（族命令组是注册表的一个投影，不是第二份实现）；
+> - ⏸ §4.3 MCP 投影保留（给 dsh 这类 MCP 宿主），但**不是**业务主接入面。
+>
+> 下文保留作历史记录，**实施时以新 spec 为准**。
+
 ```
 zcode cap list
 zcode cap describe <key>
@@ -244,6 +255,7 @@ zcode cap run <key> [--input <file>] [--json] [--param k=v ...]
 
   批量输入（多文件 / 目录）如果要做，**另起旗标**（如 `--input-dir`），**不得**复用 `--input` 改语义。
 - **不新增子命令路由到每个能力**——那会让 `zcode --help` 随能力数量线性膨胀，且参数无法统一校验。
+  - ⚠️ **2026-11-12 已被推翻**：族命令组是**业务接入面**，正是「新增子命令路由到每个能力」。→ 见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) D4。
 
 **接入点（既有四件套，缺一不可）**：
 

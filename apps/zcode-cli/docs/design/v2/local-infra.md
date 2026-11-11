@@ -630,6 +630,8 @@ zcode ocr models download --tier <basic|standard> [--source <auto|huggingface|mo
 
 ⚠️ **本组是 `zcode` 的子命令组，不是独立二进制** ⇒ 复用 `zcode` 的分派表、参数解析、退出码、i18n 与遥测；**发行链不需要第二个入口**。
 
+⚠️ **2026-11-12 新增**：命令组与子命令的**业务接入形态**（积木模型、统一信封、sidecar 接力、`inspect` 子命令、`--force`）由 [`capability-cli-blocks.md`](./capability-cli-blocks.md) 定义 —— 本 spec 只管**引擎 / 档位 / 产物**这一侧。该 spec 同时推翻了 `capability-registry.md` §4.2 的 `zcode cap run` 通用执行面。
+
 #### ⚠️ 旗标：`--path` / `--output` / `--tier` / `--source` 注册在 `zcode` 全局旗标表
 
 `zcode` 的全局解析器是 `strict: true`（`packages/cli/src/arguments.ts`），**子命令的私有旗标必须在全局表注册**，否则 `zcode ocr parse --path x.pdf` 会在进分派表之前就报"未知参数"。⇒ 这四个旗标在全局表注册，**命令组只做"哪个子命令收哪些旗标"的组合校验**（例如 `doctor` 不接受 `--path`）。

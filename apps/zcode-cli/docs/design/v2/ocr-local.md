@@ -498,8 +498,7 @@ P5\n<width> <height>\n255\n<原始灰度字节>
 **结论**：OCR 是**独立于解析层的能力**，位置如下：
 
 ```
-zcode cap run ocr --input ocr-request.json --json
-   │  ocr-request.json = { "path": "扫描件.pdf" }
+zcode ocr parse --path <文件> --json
    │  （CLI 层：能力实现 → OcrEnginePort → adapters/tesseract → ExecutionPort → tesseract 子进程）
    ▼
 写 sidecar：<源文件名>.zcode-ocr.json   ← 写在源文件旁（工作区内）
@@ -508,7 +507,7 @@ zcode cap run ocr --input ocr-request.json --json
 office-runtime 解析时读 sidecar（只读）→ 无文本层的页用 OCR 文本补上
 ```
 
-⚠️ **`--input` 只接受能力输入 JSON**（见 [`capability-registry.md`](./capability-registry.md) §4.2）—— 文件路径放在 JSON 的 `path` 字段里。**不要**写成 `--input 扫描件.pdf`（那会让 `--input` 一会儿是 JSON、一会儿是待处理文件，业务方照不同文档写代码必然有一边失败）。
+⚠️ **2026-11-12 修订**：本节原用 `zcode cap run ocr --input ocr-request.json`，现改为族积木 `zcode ocr parse --path <文件>`。⚠️ **文件路径走 `--path`，不再走 `--input`**（`--input` 的能力输入 JSON 语义随 `zcode cap run` 一起作废，见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) D4）。
 
 这样 office-runtime 保持**纯读 + 不 spawn**，OCR 也不必被塞进 office-runtime 的解析路径。
 
@@ -712,13 +711,16 @@ sidecar 的 `source.sha256` 不匹配（源文件已改）→ 该 sidecar 作废
 
 ### 6.5 对外交付形态（已定）
 
-**决策（用户已定）**：业务客户端与 ZCode **同机**（装在用户机器上），通过**子进程调 `zcode cap run ocr`** 消费 OCR 能力。
+> ⚠️ **2026-11-12 修订**：本节原写「子进程调 `zcode cap run ocr`」。用户拍板 **CLI 是交给业务调用的积木**，业务拿原子命令自己封装场景逻辑 ⇒ **不再有 `zcode cap run` 通用入口**，业务调的是**族命令组积木**（`zcode ocr inspect` / `zcode ocr parse`）。
+> 完整形态见 [`capability-cli-blocks.md`](./capability-cli-blocks.md)（D1 / D4 / D5 / §8）。本节其余内容（sidecar 是共用产物、引擎不下放给业务方、同机部署的三个要求）**继续有效**。
+
+**决策（用户已定）**：业务客户端与 ZCode **同机**（装在用户机器上），通过**子进程调族命令组积木**（`zcode ocr inspect` / `zcode ocr parse`）消费 OCR 能力。
 
 **结论：引擎与预处理归 ZCode 维护，业务客户端不持有任何 OCR 实现代码。** 业务方只依赖三样东西：
 
 | 依赖物 | 位置 | 稳定性承诺 |
 | --- | --- | --- |
-| **CLI 输出信封** | `zcode cap run ocr --json` 的 stdout | 业务方会写代码解析 → **对外公共契约**，见 [`capability-registry.md`](./capability-registry.md) §8 |
+| **CLI 输出信封** | `zcode ocr parse --json` 的 stdout | 业务方会写代码解析 → **对外公共契约**，见 [`capability-registry.md`](./capability-registry.md) §8 |
 | **退出码** | §8 那张表 | 业务方靠它判断成功 / 失败 / 取消 → **对外公共契约** |
 | **sidecar 文件** | `<源文件名>.zcode-ocr.json` | 业务方与 `office-runtime` **共用同一份产物** → 一份 OCR 结果两个消费者，不重复识别 |
 
@@ -728,9 +730,9 @@ sidecar 的 `source.sha256` 不匹配（源文件已改）→ 该 sidecar 作废
 
 **同机部署带来的三个具体要求**
 
-1. **tesseract + poppler 的安装责任在用户机器上**。ZCode 不内置引擎二进制（§9），因此 `zcode cap run ocr` 失败时**最常见**的原因是 `engine_unavailable`。→ 错误文案必须直接给出安装命令（§8 已写），业务方可以直接把 zcode 的 stderr 转给用户。
+1. **tesseract + poppler 的安装责任在用户机器上**。ZCode 不内置引擎二进制（§9），因此 `zcode ocr parse` 失败时**最常见**的原因是 `engine_unavailable`。→ 错误文案必须直接给出安装命令（§8 已写），业务方可以直接把 zcode 的 stderr 转给用户。
 2. **zcode 可执行文件的定位由业务方负责**。zcode 侧**不新增环境变量**（AGENTS.md：能用配置 / 旗标表达的优先不做环境变量）；业务方自行决定用配置文件还是进程环境变量把 zcode 路径传进来。
-3. **sidecar 是磁盘缓存，不只是接口**。业务方重复调 `zcode cap run ocr` 处理同一文件时，应当命中 sidecar 而不重跑识别 —— 但注意 sidecar 的有效性判据是 `source.sha256` + `engine` 块（§6.1），**参数变了 sidecar 就不该复用**。→ 「源文件没变就跳过识别」这条捷径由谁做（zcode 内部还是业务方）→ 未决问题见 §11 第 9 条。
+3. **sidecar 是磁盘缓存，不只是接口**。业务方重复调 `zcode ocr parse` 处理同一文件时，应当命中 sidecar 而不重跑识别 —— 但注意 sidecar 的有效性判据是 `source.sha256` + `engine` 块（§6.1），**参数变了 sidecar 就不该复用**。→ 「源文件没变就跳过识别」这条捷径由谁做（zcode 内部还是业务方）→ 未决问题见 §11 第 9 条。
 
 ⚠️ **子进程路线在批量场景下的成本**：每次调用付一次 node 启动（~200-400 ms）+ 一次引擎探测。业务方处理一个案卷（几十个 PDF）时逐个 spawn 会重复付这笔钱，而真正的大头 tesseract 单页 3~4 s 反而是叠加的。→ 是否支持一次调用处理多个文件 → §11 第 9 条。
 
@@ -755,11 +757,11 @@ sidecar 的 `source.sha256` 不匹配（源文件已改）→ 该 sidecar 作废
 | **tessdata 路径的解析** | OCR 能力层调 `LocalAssetPort.resolveGroup()` | ⚠️ **每次识别前解析，不缓存** —— 缓存会让「切换在调用前生效」落空（`model-assets.md` §7）。⚠️ **只对 tesseract 路线**；MinerU 路线不碰 tessdata（v1 不涉及资产层） |
 | **「什么时候 OCR / 结果去哪 / 要不要重试复核」** | **业务客户端** | 纯业务决策，不进 ZCode 契约 |
 
-**执行链路与 owner 图**（一次 `zcode cap run ocr` 的完整时序）
+**执行链路与 owner 图**（一次 `zcode ocr parse` 的完整时序）
 
 ```
 业务客户端
-  │  argv: cap run ocr --input ocr-request.json --json
+  │  argv: ocr parse --path <文件> --json
   ▼
 CLI 层 (apps/zcode-cli/packages/cli/src/capability-command.ts)
   │  解析 --input JSON → OcrCapabilityInput（zod 校验）
@@ -916,7 +918,7 @@ adapters/ocr/sidecar-store.ts   ← 唯一的 sidecar 写入点（FileSystemPort
 | office-runtime 接入 | `strategy: "override"` 时用 OCR 文本覆盖文本层；`"fill"` 时文本层优先 |
 | office-runtime 缓存失效 | 文档不变、**sidecar 新写** → 解析缓存失效并重解析（回归 §6.2 第 2 点） |
 | 锚点 | sidecar 第 1 页 → 锚点 `page:1` |
-| **CLI 输出信封** | `zcode cap run ocr --json` 的 stdout 是**一个** JSON 对象，含 `key` / `ok` / `output` / `metrics`；失败时含 `error.code` / `error.message` / `error.hint`（§6.5：业务方按信封解析 → 对外契约） |
+| **CLI 输出信封** | `zcode ocr parse --json` 的 stdout 是**一个** JSON 对象，含 `key` / `ok` / `output` / `metrics`；失败时含 `error.code` / `error.message` / `error.hint`（§6.5：业务方按信封解析 → 对外契约） |
 | **CLI 退出码** | 逐条对上 §8 的表（`unavailable` → 1、`cancelled` → 130、`timeout` → 124） |
 | **stderr 形状** | 失败时 stderr **只有一行**，不打印堆栈（业务方直接把 stderr 转给用户） |
 | **安装提示** | `unavailable` + `details.engineCode = "engine_unavailable"` 时，`error.hint` 含 tesseract 的安装命令（业务方不自造提示，直接透传） |
@@ -925,7 +927,7 @@ adapters/ocr/sidecar-store.ts   ← 唯一的 sidecar 写入点（FileSystemPort
 
 1. 造一份**带真 CJK 字形**的扫描件 PDF（用 Songti.ttc 嵌入，见 §2）。
 2. 写 `ocr-request.json`：`{ "path": "扫描件.pdf" }`。
-3. `zcode cap run ocr --input ocr-request.json --json` → 侧写文本里出现正确中文。
+3. `zcode ocr parse --path <文件> --json` → 侧写文本里出现正确中文。
 4. 用该 PDF 打开 pdf 插件面板 → 搜索框里能搜到 OCR 出来的词。
 
 **不测**：CI 里的真实 OCR 质量（依赖系统装包，跨平台不一致）→ 归到端到端手测。
@@ -952,5 +954,5 @@ adapters/ocr/sidecar-store.ts   ← 唯一的 sidecar 写入点（FileSystemPort
    → **待用户定**：OCR 产物要不要成为资源库的一种资源种类（需要扩 `WorkspaceResourceKind` + 扩资源库的 kind 封闭集合）？还是**就停在 sidecar**（本期倾向：sidecar 已满足「解析层能读到」这个核心诉求，扩资源库是另一件事）。**在定下来之前，本 spec 只实现 sidecar 这条路**。
 9. **去噪 / 去阴影要不要单独给「用户可发现的入口」？** 「保留在契约里、默认不启用」已定（§5.1），剩下的是**怎么让用户知道它们存在**。→ 倾向：`zcode cap describe ocr` 里列出全部可用预处理步骤与各自实测收益，让用户自己判断，不做自动推荐、不做自动开启。
 10. **子进程路线的两个具体缺口**（§6.5 引入）：
-   1. **要不要支持一次调用处理多个文件？** 业务方处理一个案卷（几十个 PDF）时逐个 spawn 会重复付 node 启动（~200-400 ms）+ 引擎探测。→ 倾向：`zcode cap run ocr` 的 `--input` 支持 JSON 数组或目录，**一次 spawn 内部按页并发**（现有逐页并发调度已就位）；但这会让 CLI 的 `--input` 语义从「单文件」变成「单文件或列表」，`capability-registry.md` §4.2 也要跟着改。v1 先不做？→ **需要用户定**：业务方的实际批量规模是多少（10 份？100 份？）。若单次调用上限在 10 份以内，逐个 spawn 的额外成本可以忽略，先不做。
+   1. ~~**要不要支持一次调用处理多个文件？**~~ → ⚠️ **2026-11-12 已定**：**zcode 不做批量旗标**。业务自己编排（循环 / 并发 spawn 积木），见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) D1 / §3.4。代价（每次 spawn 付 ~200-400ms node 启动）由业务在自己一侧拉常驻 worker 消化。
    2. **「源文件没变就跳过识别」这条捷径由谁做？** sidecar 已有 `source.sha256` + `engine` 块可判复用，但：zcode 内部跳过 → 业务方拿不到「本次没重跑」的语义，得看 `metrics`；业务方自己先读 sidecar 判断 → 省掉整个 spawn，但要业务方实现一遍 sha256 + engine 块比对。→ 倾向：**zcode 内部做**（能力层加 `if (sidecar 有效且源文件未变) → 复用`），业务方只管调；否则业务方要重复实现 sidecar 判据，两边容易判得不一致。
