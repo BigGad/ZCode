@@ -4,6 +4,7 @@ import {
   type LocalInfraPort,
   type MineruTier,
   type TierModelStatus,
+  ocrModelsDownloadCommand,
 } from "../../deps.js";
 import type { LocalReadinessProjection } from "./types.js";
 
@@ -174,6 +175,11 @@ function pickReadyTier(
  * 其余档位没有仓库映射，给不出可执行的命令（此时不编命令，交给 `doctor` 说明）。
  */
 function downloadCommandFor(model: TierModelStatus): string | undefined {
-  if (model.tier !== "basic" && model.tier !== "standard") return undefined;
-  return `zcode ocr models download --tier ${model.tier}`;
+  if (!isDownloadableTier(model.tier)) return undefined;
+  return ocrModelsDownloadCommand(model.tier);
+}
+
+/** MinerU 的 `models download --tier` 只接受这两档（实测 `mineru-kit models download --help`）。 */
+function isDownloadableTier(tier: MineruTier): boolean {
+  return tier === "basic" || tier === "standard";
 }

@@ -67,6 +67,7 @@ export {
   createUnsupportedModelInputMediaText,
   DEFAULT_DEGRADATION_POLICY,
   MINERU_INSTALL_HINT,
+  ocrModelsDownloadCommand,
   getModelUsageTotalTokens,
   getCurrentTraceContext,
   getCurrentModelInvocationContext,

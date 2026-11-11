@@ -1,6 +1,9 @@
 import type { MineruTier, TierModelStatus } from "@zcode/contracts";
-import { MINERU_TIERS } from "@zcode/contracts";
-import { MINERU_KIT_EXECUTABLE } from "./constants.js";
+import {
+  MINERU_DOWNLOADABLE_TIERS,
+  MINERU_TIERS,
+  ocrModelsDownloadCommand,
+} from "@zcode/contracts";
 
 export interface ModelRepoState {
   readonly repo: string;
@@ -105,26 +108,47 @@ export function toTierModelStatuses(status: ModelsStatus): TierModelStatus[] {
     if (requiredRepos === undefined) {
       return { tier, status: "unknown", repos: [] };
     }
-    const repos = requiredRepos.map((repoName) => {
+    // ⚠️ 「查得到」与「就绪」是两件事：
+    // - 查得到但没就绪 ⇒ 引擎**明确报出缺失**（**全新机器**就是这个状态）；
+    // - 查不到        ⇒ 状态问不出来（引擎输出被截断 / 该仓库没被列出）。
+    // 修复依据（2026-11-11）：原先只要「没有任何仓库就绪」就落成 `unknown`，
+    // 于是全新机器上 basic 档被报成 unknown ⇒ 能力供给层判成「问不出来」，
+    // **自动备资产永远不触发**。spec：local-infra.md §5.4 的档位状态表。
+    const resolved = requiredRepos.map((repoName) => {
       const known = status.repos.find((repo) => repo.repo === repoName);
       return {
         repo: repoName,
+        known: known !== undefined,
         ready: known?.ready ?? false,
-        ...(known?.path !== undefined ? { path: known.path } : {}),
+        path: known?.path,
       };
     });
+    const repos = resolved.map((repo) => ({
+      repo: repo.repo,
+      ready: repo.ready,
+      ...(repo.path !== undefined ? { path: repo.path } : {}),
+    }));
     const allReady = repos.length > 0 && repos.every((repo) => repo.ready);
-    const anyReady = repos.some((repo) => repo.ready);
-    const tierStatus = allReady ? "ready" : anyReady ? "missing" : "unknown";
+    // 引擎明确报出至少一个必需仓库缺失 ⇒ missing（有证据说缺）。
+    const anyMissing = resolved.some((repo) => repo.known && !repo.ready);
+    const tierStatus = allReady ? "ready" : anyMissing ? "missing" : "unknown";
     return {
       tier,
       status: tierStatus,
       repos,
-      ...(tierStatus === "ready"
-        ? {}
-        : { downloadCommand: `${MINERU_KIT_EXECUTABLE} models download --tier ${tier}` }),
+      // ⚠️ 下载命令只在「确实缺」且档位可下载时给（spec §5.4）：
+      // MinerU 的 `models download --tier` 只接受 basic / standard，
+      // 给 flash / advanced 编命令 = 编一个用户跑不动的命令。
+      ...(tierStatus === "missing" && isDownloadableTier(tier)
+        ? { downloadCommand: ocrModelsDownloadCommand(tier) }
+        : {}),
     };
   });
+}
+
+/** MinerU 只支持这两档的权重下载（实测 `mineru-kit models download --help`）。 */
+function isDownloadableTier(tier: MineruTier): boolean {
+  return (MINERU_DOWNLOADABLE_TIERS as readonly string[]).includes(tier);
 }
 
 function stripParenthesized(value: string): string | undefined {

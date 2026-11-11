@@ -163,16 +163,41 @@ export function hardwareDetectJson(input: {
   });
 }
 
-/** `mineru-kit models show` 的人读文本。 */
+/**
+ * `mineru-kit models show` 的人读文本。
+ *
+ * ⚠️ 形状取自**实测输出**（2026-11-11）：仓库段是 `仓库:`，每行是
+ * `<仓库名>: 就绪|缺失 (<路径>)`；路径可能被 rich 折行到下一行（见真实输出）。
+ * ⚠️ 旧的假格式（`模型仓库：` + `状态: 已就绪`）**解析器读不出来** ⇒ 用它做假引擎
+ * 等于「假装体检过了」，会让档位状态永远落在 unknown。
+ */
 export function modelsShowText(): string {
   return [
-    "模型仓库：",
-    "  MinerU-4_models_torch",
-    "    路径: /Users/tester/.mineru/models/MinerU-4_models_torch",
-    "    状态: 已就绪",
-    "模型档位：",
+    "model.base_dir: /Users/tester/.mineru/models",
+    "model.source: huggingface",
+    "仓库:",
+    "  MinerU-4_models_torch: 就绪 (/Users/tester/.mineru/models/MinerU-4_models_torch)",
+    "模型档位:",
     "  basic: MinerU-4_models_torch",
     "  standard: MinerU-4_models_torch",
+  ].join("\n");
+}
+
+/**
+ * **全新机器**上的 `mineru-kit models show`：仓库在列表里，但状态是「缺失」。
+ *
+ * ⚠️ 这是自动备资产（第 2 步）**最常见的真实场景**：引擎装好了、权重一个没下。
+ */
+export function modelsShowMissingText(): string {
+  return [
+    "model.base_dir: /Users/tester/.mineru/models",
+    "model.source: huggingface",
+    "仓库:",
+    "  MinerU-4_models_torch: 缺失 (/Users/tester/.mineru/models/MinerU-4_models_torch)",
+    "  MinerU2.5-Pro-2605-1.2B-GGUF: 缺失 (/Users/tester/.mineru/models/MinerU2.5-Pro-2605-1.2B-GGUF)",
+    "模型档位:",
+    "  basic: MinerU-4_models_torch",
+    "  standard: MinerU-4_models_torch, MinerU2.5-Pro-2605-1.2B-GGUF",
   ].join("\n");
 }
 

@@ -1,4 +1,5 @@
 import type { LocalInfraPort } from "@zcode/contracts";
+import { MINERU_DOWNLOADABLE_TIERS } from "@zcode/contracts";
 import {
   exitCodeForError,
   OCR_EXIT_ERROR,
@@ -9,7 +10,7 @@ import {
 } from "./output.js";
 
 /** MinerU 的 `models download --tier` **只接受这两档**（实测 `mineru-kit models download --help`）。 */
-const DOWNLOADABLE_TIERS = ["basic", "standard"] as const;
+const DOWNLOADABLE_TIERS = MINERU_DOWNLOADABLE_TIERS;
 type DownloadableTier = (typeof DOWNLOADABLE_TIERS)[number];
 
 /**

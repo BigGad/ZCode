@@ -48,6 +48,29 @@ export const DEFAULT_DEGRADATION_POLICY: DegradationPolicy = "error";
 export const MINERU_INSTALL_HINT = 'uv tool install --python 3.12 "mineru>=4.0,<5"';
 
 /**
+ * 有可执行下载命令的档位（MinerU 的 `models download --tier` **只接受这两档**，
+ * 实测 `mineru-kit models download --help`）。
+ *
+ * ⚠️ 定义在 contracts 是因为**三处都要用**：adapter 决定给不给下载命令、
+ * core 的就绪投影给用户的手动命令、CLI 命令面的参数校验 —— 三份各写一遍必然漂移。
+ */
+export const MINERU_DOWNLOADABLE_TIERS = ["basic", "standard"] as const;
+
+/**
+ * 用户在 ZCode 里下载模型权重的命令（**ZCode 自己的命令**，不是引擎原始命令）。
+ *
+ * ⚠️ 为什么不给 `mineru-kit models download`：引擎可能**不在 PATH 上**（只配了
+ * `ocr.mineruPath`），那条命令用户跑不动；而 `zcode ocr models download` 会走
+ * 引擎定位、代理剥离与档位校验（spec：local-infra.md §5.4 / §7.9）。
+ */
+export const OCR_MODELS_DOWNLOAD_COMMAND = "zcode ocr models download";
+
+/** 给用户的手动下载命令（档位 + 子命令拼在一起）。 */
+export function ocrModelsDownloadCommand(tier: MineruTier): string {
+  return `${OCR_MODELS_DOWNLOAD_COMMAND} --tier ${tier}`;
+}
+
+/**
  * 内部错误码（本地基础设施层内部流转）。对外归一由能力层做。
  * ⚠️ 用 `process_failed` 而不是 `engine_failed`——tesseract 路线已有的就是
  * `process_failed`，两个名字指同一件事会让按 `details.engineCode` 分支的业务方漏掉一侧。

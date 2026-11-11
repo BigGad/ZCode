@@ -288,6 +288,18 @@ model.source: huggingface
 
 ⚠️ **映射表只覆盖 `basic` / `standard`**（实测 MinerU 只给了这两档的映射）。`flash` / `advanced` **没有仓库映射** ⇒ doctor 对这两档报 `"unknown"`，**不谎报"就绪"也不谎报"缺失"**。
 
+⚠️ **档位状态（`TierModelStatus.status`）怎么从引擎输出推出来**（2026-11-11 补充，实测 `mineru-kit models show`）：
+
+| 档位状态 | 判据 | 典型场景 |
+| --- | --- | --- |
+| `ready` | 该档位的**全部**必需仓库都被引擎报为「就绪」 | 权重已下好 |
+| `missing` | 引擎**明确报出**至少一个必需仓库「缺失」 | **全新机器**（仓库在列表里、状态是「缺失」） |
+| `unknown` | 该档位**没有仓库映射**（`flash` / `advanced`），或引擎输出里**查不到**必需仓库的状态 | 引擎输出被截断 / 该仓库没被列出 |
+
+⇒ **「引擎明确说缺失」必须落成 `missing`，不能落成 `unknown`**：第 ③ 层「未就位」与「问不出来」的下一步完全不同 —— 前者可以自动下载权重，后者只能如实说「不知道」。把「缺失」误报成「未知」会让能力供给层永远停在「未就位但不知道该干什么」。
+
+⚠️ **下载命令只在 `missing` 时给，且只对 `basic` / `standard` 给**：MinerU 的 `models download --tier` **只接受这两档** ⇒ 别的档位给不出可执行的命令，就不给（不编一个用户跑不动的命令）。给用户的命令是 **ZCode 自己的** `zcode ocr models download --tier <t>`（不是引擎原始命令）：引擎可能**不在 PATH 上**（只配了 `ocr.mineruPath`），那条命令用户跑不动；ZCode 命令会走引擎定位、代理剥离与档位校验。
+
 ⚠️ **成功判据 = 退出码 0 + 产物存在**。退出码 0 不等于成功 —— `ocr-local.md` §2 已实测过 tesseract "缺 `configs/` 是静默失败：退出码 0、无产物、stderr 只有一行警告"。⇒ 适配层**必须同时断言退出码与产物存在**。
 
 ### 5.5 产物落盘
@@ -674,10 +686,14 @@ export interface ModelRepoStatus {
 /** 档位 → 需要的模型仓库。⚠️ 只有 basic / standard 有映射（实测）。 */
 export interface TierModelStatus {
   readonly tier: MineruTier;
-  /** "ready" | "missing" | "unknown"（无仓库映射，如 flash / advanced）。 */
+  /**
+   * "ready"（全部必需仓库就绪）| "missing"（引擎明确报出至少一个必需仓库缺失，
+   * 含全新机器）| "unknown"（无仓库映射，如 flash / advanced；或引擎输出里
+   * 查不到必需仓库的状态）。见 §5.4。
+   */
   readonly status: "ready" | "missing" | "unknown";
   readonly repos: readonly ModelRepoStatus[];
-  /** 下载命令（status = "missing" 时给）。 */
+  /** 下载命令（status = "missing" 且档位为 basic / standard 时给）。 */
   readonly downloadCommand?: string;
 }
 
@@ -1194,6 +1210,8 @@ OCR 能力的引擎选择**不再由能力层做**：能力把文档交给 `loca
 | **v4** | **2026-11-09** | **v1 实现落地后的规格同步。** ① Status 改为"v1 已实现"并补实施状态表；② §7.1 端口契约补 `config` / `pdf` 两个可选依赖、`MINERU_TIERS` / `MineruProxyPolicy` / `downloadModels`；③ §7.3 命令面把 `asset` 组**延期**（列出 7 条阻塞决策：目录地址只有占位 URL、签名校验、落盘位置、`--offline` 语义等），新增 `models download` 子命令（MinerU 只接受 `basic` / `standard`），并记录分发链**选第二个 runner**（不选 argv[0] 路由：两个 bin 的 argv 语义不可混）；④ §7.5 删掉 `langList`（实测 `mineru-kit parse` **没有语言选项**），补 `assetsDir` 与 `stdout` 字段，并把 JSON 样例的 `error.code` 改成**归一后的能力码**（内部码在 `details.engineCode`）；⑤ §7.6 补"两层码各司其职"表，澄清验收 A4 在端口层与命令面的**不同形状**；⑥ §5.5 修正产物分类规则（实测 `structured_content.json` 与 `middle_json.json` **同形**，"顶层有 pages"区分不了 ⇒ 先判 `schema` / `schema_version` / `pdf_info` 再判 structured）；⑦ §8 补回归覆盖现状表（A0 手工、A9 延期）；⑧ §9.2 补 O11（asset 待决）与 O12（Windows 补充实测）；⑨ §10 同步清单补状态列；⑩ `model/http-proxy.md` 补正两处表述（SOCKS 专属、不写死模型源） |
 
 | **v5** | **2026-11-11** | **命令面改名 + CLI 原子化（用户定）。** ① 独立二进制 `zcode-infr-manage` → **`zcode` 的原子子命令组 `zcode ocr`**（D5 / M5 修订）；② 新增「CLI 原子化」小节：命令组按能力域切分、平级不嵌套（`zcode ocr` / `zcode llm` / `zcode asr` / `zcode asset`），**不设"基础设施总管"二进制**；③ §7.3 旗标改为**注册到 `zcode` 全局旗标表**（`--path` / `--output` / `--tier` / `--source`，严格解析器要求），命令组只做组合校验；④ 交付形态从"第二个 bin（改 4 处分发链）"改为"**零分发改动**"，SEA / Electron 桌面**自动具备**该命令；⑤ `asset` 组从 `zcode ocr` 底下移出，成为平级命令组 `zcode asset`；⑥ `commands.md` 的"唯一进程级入口"**例外作废**（同一进程入口）；⑦ 全文 `zcode-infr-manage` → `zcode ocr`、`zcode-infr-manage asset` → `zcode asset`；⑧ §7.10 与 [`capability-provisioning.md`](./capability-provisioning.md) 互相指向（第 1 步的自动供给层） |
+
+| **v6** | **2026-11-11** | **档位状态的判据补全（修第 2 步的前置依赖）。** ① §5.4 补「档位状态（`TierModelStatus.status`）怎么从引擎输出推出来」表：`ready` = 全部必需仓库就绪；`missing` = 引擎**明确报出**至少一个必需仓库缺失（**全新机器**就是这个状态）；`unknown` = 无仓库映射（flash / advanced）或引擎输出里查不到必需仓库的状态；② 同处补「下载命令只在 `missing` 时给、且只对 `basic` / `standard` 给（给的是 ZCode 自己的 `zcode ocr models download --tier <t>`，不是引擎原始命令）」；③ §7.4 契约注释同步；④ 实施层修 `adapters/src/local-infra/models-status.ts` 的 `toTierModelStatuses`：原先「没有任何仓库就绪 ⇒ unknown」会把**全新机器**判成 unknown ⇒ 能力供给层的自动备资产**永远不触发**（见 [`capability-provisioning.md`](./capability-provisioning.md) A15） |
 
 ⚠️ **审查发现的问题分布**：契约一致性 11 阻断 + 12 高 + 6 低；架构合规 3 P0 + 12 P1 + 3 P2；实现可行性 5 P0 + 13 P1 + 7 P2；证据充分性 7 P0 + 9 P1 + 9 P2。
 

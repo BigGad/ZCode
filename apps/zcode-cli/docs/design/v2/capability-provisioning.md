@@ -14,6 +14,7 @@ Status: **第 1 / 2 步已实现**（2026-11-11）：就绪状态投影 + 规则
 | 产物 variant kind | `contracts` 的 `WorkspaceResourceVariant.kind` | ✅ 已加 `ocr` |
 | 产物目录解析 | `contracts` 的 `ToolArtifactStorePort.resolveSessionArtifactDir?` | ✅ 已加（可选方法；缺席即放弃本地路线） |
 | 配置读取的唯一 owner | `adapters/src/config/ocr-config.ts` 的 `loadOcrRuntimeSettings` | ✅ 已写（命令面与 runtime 共用同一份配置） |
+| 档位状态映射（第 2 步的前置依赖） | `adapters/src/local-infra/models-status.ts` 的 `toTierModelStatuses` | ✅ 已修（2026-11-11）：引擎明确报「缺失」⇒ 落成 `missing`（原先误报 `unknown`，**全新机器上自动备资产永远不触发**） |
 
 > ⚠️ **本 spec 是新的一层，不是给已有层加分支。** 现有四层各管一件事，缺的正是「就位」这一环 —— 现在整条链的能力供给是「**不可用就报错**」（`engine_unavailable` / `transcription_engine_unavailable`），而产品要的是「**不可用就建起来**」。
 
@@ -86,6 +87,8 @@ Status: **第 1 / 2 步已实现**（2026-11-11）：就绪状态投影 + 规则
 - **未就位** = ZCode 托管资产的本分（`model-assets.md` §1「模型与语言包由 ZCode 托管」）→ 由 ZCode 备（第 2 步）。
 
 ⚠️ **第 1 步只做到「不可用时把下一步说清楚」；第 2 步起第 ③ 层由 ZCode 自动备**：第 ③ 层要备的是 **MinerU 官方模型权重**，现成的 `mineru-kit models download --tier <basic|standard>` 就能做（`zcode ocr models download` 已实现并实测过）⇒ **不需要自建分发链，也不需要签名**（asset 组的 7 条待决卡的是 **ZCode 自己的资产分发**，不是这条）。
+
+⚠️ **第 ③ 层依赖适配层的档位状态落法**（`local-infra.md` §5.4）：只有 `models[].status === "missing"` 才投影成「未就位」并触发自动备资产。适配层若把「引擎明确报出仓库缺失」落成 `unknown`（含**全新机器**这个最常见的场景），第 ② 步就永远判成「问不出来」⇒ **自动备资产永远不触发**。⇒ 「缺失 vs 未知」的区分是本层的**前置依赖**，不是可以事后补的细节。
 
 ## 5. 三步路线
 
@@ -423,6 +426,7 @@ export interface ProvisioningDecision {
 | A12 | **备资产失败** | 明确报错（带 rule-14 + 引擎原因 + 手动下载命令），**不解析、不假装看到了文档** | core |
 | A13 | **自动备资产可关** | `ocr.autoProvision: false` ⇒ 不下载权重，回到第 1 步的「明确报错 + 下一步命令」 | core + adapters |
 | A14 | **取消要透传** | 用户取消任务时，正在进行的权重下载**一起停**（取消信号透传到执行端口） | adapters |
+| A15 | **全新机器上「缺失」不能被当成「未知」** | 引擎明确报出必需仓库「缺失」⇒ 档位状态落成 `missing`（不是 `unknown`）⇒ 就绪状态是「未就位」⇒ 自动备资产**真的会触发** | adapters + core |
 
 ⚠️ **A7 的形状很关键**：v1 不实现 `cloud`，但策略取值被配置成 `cloud` 时**必须明确报错**（"该策略尚未支持"），不能悄悄按 `error` 执行 —— 悄悄降级会让用户以为还在本地跑。
 
