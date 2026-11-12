@@ -1631,15 +1631,23 @@ exceptions:
       - apps/zcode-cli/packages/adapters/src/local-infra/tier-selection.ts
       - apps/zcode-cli/packages/adapters/src/local-infra/models-status.ts
       - apps/zcode-cli/packages/adapters/src/local-infra/artifact-store.ts
+      - apps/zcode-cli/packages/adapters/src/local-infra/analyze.ts
       - apps/zcode-cli/packages/adapters/src/fs/zip-extract.ts
       - apps/zcode-cli/packages/cli/src/ocr/index.ts
       - apps/zcode-cli/packages/cli/src/ocr/arguments.ts
       - apps/zcode-cli/packages/cli/src/ocr/output.ts
+      - apps/zcode-cli/packages/cli/src/ocr/analysis-flow.ts
       - apps/zcode-cli/packages/cli/src/ocr/doctor-command.ts
+      - apps/zcode-cli/packages/cli/src/ocr/inspect-command.ts
       - apps/zcode-cli/packages/cli/src/ocr/parse-command.ts
       - apps/zcode-cli/packages/cli/src/ocr/models-command.ts
       - apps/zcode-cli/packages/cli/src/ocr/sidecar-store.ts
-    reason: 本地模型/解析基础设施（2026-11-09，spec：apps/zcode-cli/docs/design/v2/local-infra.md；2026-11-11 命令面改名与 CLI 原子化修订；2026-11-12 能力积木 CLI 统一信封与 sidecar v3，spec：apps/zcode-cli/docs/design/v2/capability-cli-blocks.md）。三层各自有单一所有者：contracts 的 local-infra.port.ts 只声明端口（纯接口，不含 zod）；adapters 的 local-infra/* 负责引擎定位、档位判定、子进程调用与产物分类，zip-extract.ts 是它的通用解包工具；cli 的 ocr/* 只做组合校验、输出投影、退出码与 sidecar 存取（sidecar-store.ts 的文件 IO 一律走 FileSystemPort，不直接碰 node:fs）。依赖方向 contracts ← adapters ← cli 未变。⚠️ `zcode ocr` 是 `zcode` 的**子命令组**（不是独立二进制），故 cli 的 ocr/* 不再要求"不 import run.ts"；cli 的 ocr/* import 的 @zcode/core 只取**能力积木层**（信封构造、错误归一、sidecar 纯函数——无 IO、无运行时依赖），这是 cli 包既有依赖方向（core 不反向依赖 cli），不是新增耦合。接管整个 contracts/adapters/cli 包不在本次范围内。
+    reason: 本地模型/解析基础设施（2026-11-09，spec：apps/zcode-cli/docs/design/v2/local-infra.md；2026-11-11 命令面改名与 CLI 原子化修订；2026-11-12 能力积木 CLI 统一信封与 sidecar v3，spec：apps/zcode-cli/docs/design/v2/capability-cli-blocks.md）。三层各自有单一所有者：contracts 的 local-infra.port.ts 只声明端口（纯接口，不含 zod）；adapters 的 local-infra/* 负责引擎定位、档位判定、子进程调用与产物分类，zip-extract.ts 是它的通用解包工具；cli 的 ocr/* 只做组合校验、输出投影、退出码与 sidecar 存取（sidecar-store.ts 的文件 IO 一律走 FileSystemPort，不直接碰 node:fs）。⚠️ **2026-11-12 的 v2.3 补充**：adapters 的 local-infra/analyze.ts 是**分析路线自决**（原生分析 vs 识别，spec §6.7），cli 的 ocr/analysis-flow.ts 是 `inspect` 与 `parse` **共用的分析流水线**（指纹 → 缓存判定 → 跑引擎 → 写 sidecar → 保证 markdown 存在），ocr/inspect-command.ts 是 `inspect` 积木的命令面（输出里去掉元素文字）。依赖方向 contracts ← adapters ← cli 未变。⚠️ `zcode ocr` 是 `zcode` 的**子命令组**（不是独立二进制），故 cli 的 ocr/* 不再要求"不 import run.ts"；cli 的 ocr/* import 的 @zcode/core 只取**能力积木层**（信封构造、错误归一、sidecar 纯函数——无 IO、无运行时依赖），这是 cli 包既有依赖方向（core 不反向依赖 cli），不是新增耦合。接管整个 contracts/adapters/cli 包不在本次范围内。
+  - id: ocr-native-layout-unmanaged-files
+    rule: unmanaged-new-file
+    paths:
+      - apps/zcode-cli/packages/adapters/src/pdf/layout-xml.ts
+    reason: PDF 原生版面分析（2026-11-12，spec：apps/zcode-cli/docs/design/v2/capability-cli-blocks.md §6.7）。layout-xml.ts 是 poppler `pdftohtml -xml` 输出的**纯解析器**（碎片合并成行、绝对坐标减页偏移），不发起任何子进程、不碰文件系统（图片路径只做相对/绝对判定）⇒ 归属 PDF 适配器这一层，与同目录的 index.ts（子进程调用）职责分离。core 不依赖 adapters 的方向未变；命令面只经 PdfDocumentPort 端口拿结果。
   - id: capability-provisioning-unmanaged-files
     rule: unmanaged-new-file
     paths:

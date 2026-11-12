@@ -1,7 +1,7 @@
 # 能力积木 CLI（业务侧积木模型）
 
-Status: **规划稿 v2.2**（2026-11-12）：形态已与用户对齐定稿；**步 0–3 已实施**（统一信封 + 错误码闭集、`zcode ocr` 的信封迁移与 stderr 分流、sidecar v3 与缓存接力）；**`--pdf-password` 的加密 PDF 路线已落地**（v2.2 订正 v2.1 的失实表述）。
-⚠️ **步 4（`zcode ocr inspect`）未开工** —— 依赖 §12 的 O1（数字版 PDF 原生分析的技术路线）未决。
+Status: **规划稿 v2.3**（2026-11-12）：形态已与用户对齐定稿；**步 0–5 已实施**（统一信封 + 错误码闭集、`zcode ocr` 的信封迁移与 stderr 分流、sidecar v3 与缓存接力、`zcode ocr inspect` 积木、`zcode ocr parse` 的产物补齐）；**`--pdf-password` 的加密 PDF 路线已落地**（v2.2）；**数字版 PDF 的原生分析路线已定案并落地**（v2.3，O1 的答案 = poppler `pdftohtml -xml`）。
+⚠️ **步 6（旧 spec 口径同步）与步 7（业务接入说明）待做**。
 ⚠️ 本 spec **推翻** [`capability-registry.md`](./capability-registry.md) §4.2 的「统一执行面 `zcode cap run` + 不新增子命令路由到每个能力」，并**修订** [`ocr-local.md`](./ocr-local.md) §6.1 / §6.1.1（sidecar 格式）与 §6.5（交付形态）。冲突处以本 spec 为准。
 
 ## 1. 目的与范围
@@ -79,8 +79,10 @@ zcode 一侧只保证三件事：
 
 | 路线 | 何时走 | 要什么 | 产出 |
 | --- | --- | --- | --- |
-| **PDF 原生分析**（`route: "pdf-native"`） | **数字版 PDF**（有文本层） | poppler（见 §4.3） | 页成分 + 文本位置 + 文本内容（从文本层直取） |
-| **识别**（`route: "mineru"`） | **扫描件 / 图片型 PDF**（无文本层） | MinerU + 权重 | 页成分 + 文本位置 + 文本内容 + 图片位置 |
+| **PDF 原生分析**（`route: "pdf-native"`） | **数字版 PDF**（每页都有文本层） | poppler（见 §4.3） | 页成分 + 文本位置 + 文本内容（从文本层直取）+ 内嵌图片位置 |
+| **识别**（`route: "mineru"`） | **扫描件 / 图片型 PDF**（存在没有文本层的页） | MinerU + 权重 | 页成分 + 文本位置 + 文本内容 + 图片位置 |
+
+✅ **v2.3 定案（O1 的技术路线）**：原生分析走 **poppler 的 `pdftohtml -xml`**（实测见 §6.7），一次调用同时给出**页尺寸（pt）**、**文本块 bbox + 文本**、**内嵌图片 bbox**（并把图片抽成 PNG 落在产物目录里）⇒ 不需要「文本走 `pdftotext`、图片走 `pdfimages`」两条命令再自己合坐标。
 
 ⚠️ **为什么 `inspect` 和 `parse` 是两个积木而不是一个**：按需付费。业务常常只需要「这页是纯文本还是纯图片、图和文各在哪」，**不该被迫付一次完整识别 + markdown 产物的代价**。数字版 PDF 上 `inspect` 走原生分析（不需要权重）；扫描件上判定页成分**必须**先识别（扫描件就是一张位图，不识别不知道上面有没有字）⇒ 扫描件上 `inspect` 的代价与 `parse` 同量级，这是**输入决定的**，不是 zcode 能省的。
 
@@ -131,7 +133,7 @@ zcode 一侧只保证三件事：
 
 | 积木 | 参数 | 说明 |
 | --- | --- | --- |
-| `zcode ocr inspect` | `--path <文件>`（必填）、`--output <目录>`、`--json`、`--force` | 只出页成分 + 元素位置，**不返回文字正文**。`--output` 是**产物目录**（渲染出的整页图 / 引擎裁图落这里），不是「只写一个结果文件」 |
+| `zcode ocr inspect` | `--path <文件>`（必填）、`--output <目录>`、`--pdf-password <密码>`、`--json`、`--force` | 只出页成分 + 元素位置，**不返回文字正文**。`--output` 是**产物目录**（渲染出的整页图 / 引擎裁图落这里），不是「只写一个结果文件」。⚠️ **`--pdf-password` 是 v2.3 补的** —— 原生分析路线直接吃加密 PDF（poppler 支持 `-upw`），不给密码就解不开 |
 | `zcode ocr parse` | `--path <文件>`（必填）、`--output <目录>`、`--tier <档位>`、`--pdf-password <密码>`、`--json`、`--force` | 出文字 + markdown + 页成分 + 位置 |
 | `zcode ocr doctor` | `--json` | 只读 |
 | `zcode ocr models download` | `--tier <basic\|standard>`（必填）、`--source <auto\|huggingface\|modelscope>`、`--json` | 引擎只接受 basic / standard（实测 `mineru-kit models download --help`） |
@@ -153,6 +155,16 @@ zcode 一侧只保证三件事：
 | `parse` | **加密 PDF** | 同上 + poppler 的 **`pdftocairo`**（poppler 自带，非新依赖） | 没装 poppler ⇒ 加密 PDF 走不通（`unavailable`）；**未加密 PDF 不受影响**（不会调 `pdftocairo`）。解密路线见 [`ocr-local.md`](./ocr-local.md) §3.2.1 |
 
 ⚠️ **poppler 是第三类依赖**（引擎、Python、权重之外）⇒ 必须写进业务接入说明，否则业务第一次调 `inspect` 就撞墙。
+
+✅ **v2.3 补齐：poppler 的三个二进制各管一段**（实测）：
+
+| poppler 二进制 | 谁用 | 缺了会怎样 |
+| --- | --- | --- |
+| `pdftohtml` | **原生分析路线**（页尺寸 / 文本 bbox / 内嵌图片 bbox）+ 路线判定 | ⚠️ **路线判不出来** ⇒ 走识别路线 + **明确 warning**（§7）—— 数字版 PDF 会多付一次权重代价，但**不静默** |
+| `pdftocairo` | 加密 PDF 的解密副本（识别路线） | 加密 PDF 走不通（`unavailable`）；未加密 PDF 不受影响 |
+| `pdftoppm` | 识别路线里**扫描页的整页图**（`origin: "rendered"`） | 扫描页拿不到整页图（页成分仍由引擎给）⇒ 一条 warning |
+
+⚠️ **纯扫描件 + 没装 poppler 仍然可用**（走识别路线即可）⇒ poppler 不是「能不能 OCR」的前置条件，是「**能不能走便宜路线 + 能不能拿到扫描页整页图**」的前置条件。
 
 ## 5. 统一信封与退出码
 
@@ -290,6 +302,38 @@ zcode 一侧只保证三件事：
 ⚠️ **`cached` 是业务判断「这次有没有再烧一次识别」的依据** —— `true` 表示直接复用了 sidecar，`false` 表示真的跑了一遍引擎。
 ⚠️ **命中缓存时 `artifacts` 只有 sidecar 里记着的 markdown 路径**（sidecar 不记结构化产物的路径 —— 它们是引擎原生产物，调试用）。
 ⚠️ **请求没给 `--tier` 而命中了缓存时**，`output.tier` 是 sidecar 里的实际档位，且 `metrics.warnings` 里有一条「本次用的是 sidecar 里的档位 X」⇒ 业务看得见实际用了哪一档。
+⚠️ **v2.3**：`output.engine` 取值扩到 `"pdf-native"`（原生分析路线）—— 业务据此知道「这次没烧权重」。
+
+### 5.8 `ocr.inspect` 的 `output` 形状（v2.3 定稿）
+
+```jsonc
+"output": {
+  "cached": false,                      // true = 命中 sidecar 缓存（**没重新分析**）
+  "sidecarPath": "/abs/扫描件.pdf.zcode-ocr.json",
+  "artifactsDir": "扫描件.pdf.mineru",  // ⚠️ **相对 sidecar 所在目录**
+  "engine": "mineru",                   // "mineru" | "pdf-native"
+  "tier": "basic",                      // 原生分析路线恒为 "native"
+  "pages": [                            // ⚠️ **逐页成分 + 逐元素位置**
+    {
+      "pageIndex": 0,
+      "widthPt": 595.3,
+      "heightPt": 841.9,
+      "status": "ok",                   // "ok" | "failed"
+      "composition": "text+image",      // §6.4 的成分闭集
+      "otherElements": 0,
+      "elements": [
+        { "category": "text",  "type": "text",  "origin": "engine",
+          "bbox": [0.117, 0.086, 0.379, 0.113] },     // ⚠️ **没有 text 字段**
+        { "category": "image", "type": "image", "origin": "engine",
+          "bbox": [0.300, 0.400, 0.700, 0.720], "imagePath": "layout-1_1.png" }
+      ]
+    }
+  ]
+}
+```
+
+⚠️ **`inspect` 的输出里没有文字正文** —— 元素的 `text` 字段**不出现在 `output` 里**（这是 `inspect` 与 `parse` 的唯一区别）。⚠️ **但 sidecar 里仍然带逐元素文字**（§3.1）⇒ `parse` 能接力，不必重跑引擎。
+⚠️ **`inspect` 不产出 markdown** —— `output` 里没有 `artifacts`（那是 `parse` 的字段）。
 
 ## 6. 产物 sidecar 契约
 
@@ -310,7 +354,7 @@ zcode 一侧只保证三件事：
   "engine": {
     "name": "mineru",              // "mineru" | "pdf-native"
     "variant": "mineru",           // 引擎变体名
-    "version": "4.1.7",            // 引擎版本（pdf-native 时为 zcode 内建分析器版本）
+    "version": "4.1.7",            // 引擎版本（pdf-native 时为 **poppler 版本**，实测 26.09.0）
     "tier": "basic",               // 档位（pdf-native 路线恒为 "native"）
     "route": "mineru",             // 内部路线，业务不依赖
     "assets": {}                   // 用到的资产（语言包 / 权重组）
@@ -419,6 +463,17 @@ zcode 一侧只保证三件事：
 
 ⚠️ **未知类型不静默吞掉**：页上给 `otherElements` 计数，让业务能看见「有东西我没认出来」。
 
+⚠️ **v2.3：原生分析路线的元素类型**（映射表不用改 —— 用的就是表里已有的两个名字）：
+
+| 来源 | `type` | `category` | `origin` |
+| --- | --- | --- | --- |
+| 原生分析的文本行 | `text` | `text` | `engine` |
+| 原生分析的内嵌图片 | `image` | `image` | `engine` |
+| ZCode 渲染的扫描页整页图 | `page` | `image` | `rendered` |
+
+⚠️ **原生分析的文本元素是「行级」而不是「词级」** —— poppler 的 `pdftohtml -xml` 给的是**文字片段**（实测一段中文会被拆成 `"本地"` / `" OCR "` / `"路线验证"` 这样的碎片），⇒ ZCode 按**竖直重叠**把碎片合并成行（一行的 bbox = 片段 bbox 的并集，文本按左边界拼接）。
+⚠️ **合并成行是必要的** —— 派生的 markdown 若按碎片输出，一个词一段，正文没法读（§6.5 的派生规则）。
+
 ⚠️ **图片位置 + 文本位置**由 `elements[]` 的 `bbox` 给出（归一化，`[x0,y0,x1,y1]`，分母是页级 `widthPt` / `heightPt`）。⚠️ **业务换算像素必须自己乘分母** —— zcode 不给像素坐标，因为渲染 DPI 是引擎侧的实现细节。
 
 ⚠️ **图片本体已由引擎裁好落盘**（`imagePath`）—— 业务直接拿文件，**不要自己按 bbox 裁**（自己裁会引入 DPI 差异，与 `ocr-local.md` 里 PGM 无 DPI 那个坑同类）。⚠️ **扫描页的整页图由 ZCode 渲染**（`origin: "rendered"`），业务同样直接用。
@@ -432,6 +487,7 @@ zcode 一侧只保证三件事：
 3. **档位判据**：
    - 请求**给了** `--tier` ⇒ 必须 `sidecar.engine.tier` **等于**请求档位，否则**不命中**；
    - 请求**没给** `--tier` ⇒ 命中任意档位，但 `metrics.warnings` 里提示「本次用的是 sidecar 里的档位 X」（业务看得见）；
+   - ⚠️ **v2.3 补一条例外**：**原生分析路线没有质量档位**（`sidecar.engine.tier = "native"`）⇒ 判据 3 对它**不适用**（请求给了 `--tier` 也照样命中）。⚠️ 若照字面执行，数字版 PDF 每次都会「档位不符 ⇒ 重算」，缓存形同虚设。
 4. **积木所需产物判据**：
 
 | 积木 | 命中所需的 sidecar 内容 |
@@ -461,9 +517,53 @@ zcode 一侧只保证三件事：
 
 ⚠️ **markdown 产物的来源（写死）**：`parse` 的 markdown **优先复用** sidecar 的 `text.markdownPath` 指向的产物（识别路线下引擎已产出）；**没有**该产物时（原生分析路线），**从 sidecar 的元素派生**（按元素顺序：文本类输出 `text`、图片类输出 `![caption](imagePath)`、表格类输出 `text`）。⇒ 两条路线下 `parse` 都不需要再跑引擎。
 
+✅ **v2.3 补齐派生的两个细节**：
+
+| 场景 | 行为 |
+| --- | --- |
+| **原生分析路线**（sidecar 没有 `text.markdownPath`） | `parse` 从 sidecar 的元素派生 markdown，写到 `<artifactsDir>/markdown.md`，并把 `text.markdownPath = "markdown.md"` **回填进 sidecar**（下一次 `parse` 直接复用） |
+| **识别路线**（引擎已产出 markdown） | 直接复用引擎那份（`text.markdownPath` 指向它），**不重新派生** |
+
+⚠️ **派生出来的 markdown 落进产物目录** ⇒ 其中的图片引用（`![](images/xxx.jpg)`）相对产物目录解析，**与引擎那份 markdown 的引用基准一致**（引擎的 markdown 也在产物目录根）。
+⚠️ **缓存命中时也要保证 markdown 存在** —— 命中的是「没跑引擎」，不是「什么都不做」：缺 markdown 就派生一份（不重跑引擎）。
+
 ### 6.6 原子写
 
 sidecar 写入必须是「先写临时文件再 rename」（沿用 `ocr-local.md` §7），保证并发读者不会看到半截 JSON。
+
+### 6.7 原生分析路线的实现（v2.3 定稿，O1 的答案）
+
+**命令**（一次调用同时给出页尺寸 / 文本 bbox / 图片 bbox）：
+
+```
+pdftohtml -xml -zoom 1 -noroundcoord -hidden -nodrm -q [-upw <密码>] <pdf> <产物目录>/layout.xml
+```
+
+⚠️ **实测依据**（poppler 26.09.0，macOS）：
+
+| 事实 | 值 |
+| --- | --- |
+| `<page>` 属性 | `number`（1 基）、`top` / `left` / `height` / `width`（**pt**，`-zoom 1` 下 1pt = 1/72 英寸） |
+| `<text>` 属性 | `top` / `left` / `width` / `height` + 文本内容（HTML 转义，UTF-8） |
+| `<image>` 属性 | `top` / `left` / `width` / `height` + `src`（抽出的图片文件） |
+| 抽出的图片 | 与 XML 输出**同目录**，文件名 `<输出基名>-<页号>_<序号>.<扩展名>`（扩展名随原图格式，实测有 `.png` 也有 `.jpg`） |
+| 加密 PDF | `-upw` / `-opw` **直接支持**（密码错 ⇒ 退出码 1 + stderr `Command Line Error: Incorrect password`）⇒ 原生分析路线**不需要解密副本** |
+| `<text>` 粒度 | **碎片级**（词/短语），⇒ ZCode 合并成行（§6.4） |
+
+⚠️ **`-noroundcoord` 保留小数精度**（不加就是整数坐标，窄列的 bbox 会失真）。
+⚠️ **坐标是「绝对」的**（`position="absolute"`）⇒ 元素的 bbox 要**减去页的 `top` / `left`** 才是页内坐标。
+
+**路线判定（写死）**：
+
+| 输入 | 判定 | 路线 |
+| --- | --- | --- |
+| **图片**（png / jpg / …） | 没有任何本地版式可分析 | 识别 |
+| **PDF，每页都有非空文本层** | 文本层齐备 | **原生分析** |
+| **PDF，存在没有文本层的页** | 有页需要识别 | 识别（整份文档交给引擎） |
+| **PDF，且 poppler 不可用** | **判不出来** | 识别 + **明确 warning**（§7） |
+
+⚠️ **判定是「整份文档」级，不是「逐页」级** —— 引擎的输入是整份文档（`mineru-kit parse <pdf> --pages all`），逐页混排会让页号对不上。⚠️ **代价**：一份「99 页数字版 + 1 页扫描件」的文档会整份走识别路线（多付权重代价，但**不会丢内容**）—— 这是刻意的取舍：**宁可多算，不可漏页**。
+⚠️ **数字版 PDF 里的一页纯空白**（没有文本层、也没有内嵌图）也会让整份文档走识别路线（同上取舍）。
 
 ## 7. 积木内部的过程自决
 
@@ -472,7 +572,8 @@ sidecar 写入必须是「先写临时文件再 rename」（沿用 `ocr-local.md
 | 决策点 | 积木内部行为 | 业务看到 |
 | --- | --- | --- |
 | 引擎不可用 | 报 `unavailable` + `hint`（装法） | `error.hint` 可直接转给用户 |
-| ⚠️ **路线判定能力缺失**（数字版 PDF 但 poppler 不可用） | 报 `unavailable` + `hint`（装法，§4.3） | `error.hint`（**不静默退到识别路线** —— 那会让业务多付一次权重代价，且违背「本地基础设施」的可见性） |
+| ⚠️ **路线判定能力缺失**（poppler 不可用 ⇒ 判不出文档有没有文本层） | ⚠️ **v2.3 改口径**：**不报错**，走识别路线 + **一条明确的 warning**（「未检测到 poppler，无法走原生分析路线，本次走识别路线；若文档是数字版 PDF，会多付一次权重代价」） | `metrics.warnings` + `output.engine = "mineru"`（业务看得见这次走的是哪条路；**不静默**） |
+| ⚠️ **poppler 缺失带来的次生缺口**（加密 PDF 解不开 / 扫描页拿不到整页图） | 加密 PDF ⇒ `unavailable` + `hint`（装法）；扫描页整页图 ⇒ **跳过** + 一条 warning（页成分仍由引擎给） | `error.hint` 或 `metrics.warnings` |
 | 档位就绪 | 直接用 | 无感 |
 | 档位未就位 | **自动备资产**（默认开，D11），或按 `ocr.degradation` 降级 | 降级进 `metrics.warnings`，**不进 `error`**（降级不是错误） |
 | 全部路线不可用 | 报 `unavailable` | `error.code` |
@@ -504,7 +605,7 @@ sidecar 写入必须是「先写临时文件再 rename」（沿用 `ocr-local.md
 | --- | --- |
 | [`capability-registry.md`](./capability-registry.md) | ⚠️ **§4.2 修订**：投影 A 不再是 `zcode cap run`，改为族命令组（D4）。⚠️ **§2 修订**：「能力键走新命令 `zcode cap run <key>`」作废，能力键是**注册表**概念、CLI 面发的是**积木 id**（D13 / §5.1）。§3 契约 / §7 退出码 / §8 信封**沿用**。§4.3 MCP 投影保留但降级；§4.4 内置工具投影（agent 自用）不受影响 |
 | [`ocr-local.md`](./ocr-local.md) | ⚠️ **§6.1 / §6.1.1 修订**：两个引擎变体 sidecar **作废**，统一到本 spec §6.2 的 **v3**（D12；对照表见 §6.3）。§6.5 修订：交付形态不再写死「子进程调 `zcode cap run ocr`」，改为「子进程调族积木」。§7 的 owner 表**标为历史记录**（tesseract 时代，多数行指向不存在的包），执行链路图按 D8 改写 |
-| [`local-infra.md`](./local-infra.md) | §7.3 的命令组表**沿用**（`zcode ocr` 三个子命令），本 spec 补 `inspect` 积木与 `--force`；§5.4 的档位状态语义不变；§5.5 的 sidecar 字段名要求（`pageWidthPt` / `pageHeightPt`）按 §6.3 改为页级 `widthPt` / `heightPt` |
+| [`local-infra.md`](./local-infra.md) | §7.3 的命令组表**沿用**（`zcode ocr` 的子命令从三个增到**四个**：补 `inspect`），本 spec 补 `inspect` 积木与 `--force` / `--pdf-password`；§5.4 的档位状态语义不变，**载体改成统一信封**；§5.5 的 sidecar 字段名要求（`pageWidthPt` / `pageHeightPt`）按 §6.3 改为页级 `widthPt` / `heightPt` |
 | [`capability-provisioning.md`](./capability-provisioning.md) | 路线决策规则**沿用**；本 spec 只定义它与积木契约的接口（§7） |
 | [`model-assets.md`](./model-assets.md) | `zcode asset` 族延期，占位地址未换（`local-infra.md` §7.3）；本 spec 不动它 |
 | [`audio-input.md`](./audio-input.md) | 云端 ASR 附件，不含本地命令组；`zcode asr` 族待写 spec（O6：暂不定） |
@@ -524,6 +625,8 @@ sidecar 写入必须是「先写临时文件再 rename」（沿用 `ocr-local.md
 | **运维面单列**（D14） | `doctor` ⇒ `ok: true` + 退出码 `0`（引擎缺失落在 `output.report` 里，不进 `error`）；`models download` 失败 ⇒ `ok: false` + 退出码 `1` |
 | **旧信封已消失** | `zcode ocr parse --json` 不再出现顶层 `warnings` / `engine` / `tier` / `degradedFrom`；`engine` / `tier` 移进 `output` 或 sidecar，`warnings` / `degradedFrom` 进 `metrics` |
 | **进度通道**（D15） | `--json` 时 stdout **只有**信封一个 JSON 对象；stderr 逐行是 `{"type":"progress",…}`；失败时 **stderr 无错误行**（错误只在 stdout 信封） |
+| **`inspect` 不返回正文**（v2.3） | `zcode ocr inspect --json` 的 `output.pages[].elements[]` **不含 `text` 字段**；sidecar 里**含**逐元素文字（接力的前提） |
+| **`inspect` 与 `parse` 的产物面**（v2.3） | `inspect` 的 `output` 里**没有** `artifacts`；`parse` 的 `output` 里**有** `artifacts.markdownPath` |
 
 ### 10.2 sidecar
 
@@ -544,6 +647,9 @@ sidecar 写入必须是「先写临时文件再 rename」（沿用 `ocr-local.md
 | **档位判据** | 请求 `--tier` 与 sidecar 档位不同 ⇒ 不命中并重算；请求不给 `--tier` ⇒ 命中且 `metrics.warnings` 提示实际档位 |
 | **指纹失效** | 源文件内容改动 ⇒ 缓存不命中，重新计算 |
 | `--force` | 强制重算并覆盖 sidecar |
+| **原生分析路线**（v2.3） | 数字版 PDF ⇒ `engine.name = "pdf-native"`、`engine.tier = "native"`；页成分来自文本层与内嵌图；**不产生**任何 MinerU 产物 |
+| **原生路线的档位无关性**（v2.3） | 原生路线的 sidecar 在请求给了 `--tier` 时**照样命中**（§6.5 判据 3 的例外） |
+| **路线判定**（v2.3） | 存在没有文本层的页 ⇒ 走识别路线（`engine.name = "mineru"`）；poppler 不可用 ⇒ 识别路线 + `metrics.warnings` 有一条明确的说明 |
 
 ### 10.3 积木边界
 
@@ -574,8 +680,8 @@ sidecar 写入必须是「先写临时文件再 rename」（沿用 `ocr-local.md
 | 1 | **统一信封与错误码**：契约进 `packages/contracts/src/capability-blocks/`；实现进 `packages/core/src/capability/`；装配进 `packages/bootstrap/` | 0 | ✅ **已做**（契约 + 实现；bootstrap 装配随 O4 一起做，见下） |
 | 2 | **迁移 `zcode ocr` 的信封**到统一信封（§5.4 的逐字段迁移清单）+ **修 stderr 分流**（错误行 / 进度行，§5.6） | 1 | ✅ **已做** |
 | 3 | **sidecar v3**：统一格式 + 分类规则（全枚举）+ 指纹 + 原子写 + 接力（`--force`） | 2 | ✅ **已做** |
-| 4 | **`zcode ocr inspect` 积木**：页成分 + 元素位置（数字版 PDF 走 PDF 原生分析，扫描件落识别路线） | 3 | ⏸ **未开工**（O1 未决） |
-| 5 | **`zcode ocr parse` 补齐**产物（文字 / markdown 进同一份 sidecar；markdown 派生规则见 §6.5） | 4 | ⏸ 未开工（依赖步 4） |
+| 4 | **`zcode ocr inspect` 积木**：页成分 + 元素位置（数字版 PDF 走 PDF 原生分析，扫描件落识别路线） | 3 | ✅ **已做**（v2.3：poppler `pdftohtml -xml` 路线；实测：数字版 PDF 走原生路线不烧权重，扫描件落识别路线） |
+| 5 | **`zcode ocr parse` 补齐**产物（文字 / markdown 进同一份 sidecar；markdown 派生规则见 §6.5） | 4 | ✅ **已做**（v2.3：识别路线复用引擎 markdown，原生路线按 §6.5 派生 `markdown.md` 并回填 sidecar） |
 | 6 | **同步旧 spec 口径**：把 §9 表里列的 6 份 spec 的过期引用改掉（`zcode cap run` / `--input` / 旧 sidecar 字段名 / `zcode cap describe`） | 1 | ⏸ 未做 |
 | 7 | 契约文档化：`zcode ocr --help` 的族内动词表 + 业务接入说明（含 §4.3 的前置依赖） | 5 | 🟡 **部分**：`zcode ocr --help` 已含旗标与产物说明；业务接入说明未写 |
 
@@ -599,7 +705,7 @@ sidecar 写入必须是「先写临时文件再 rename」（沿用 `ocr-local.md
 
 | 编号 | 问题 | 阻塞 | 影响 |
 | --- | --- | --- | --- |
-| **O1** | **数字版 PDF 的版面分析走哪条技术路线？** poppler（`pdftotext -bbox` 给词级 bbox、`pdfimages -list` 给图片对象）+ 自己算 bbox？还是有别的库？⚠️ **结果语义已定**（没识别出来 ⇒ 空白页），**待定的是实现路线** | **步 4** | 决定第 4 步的工作量与跨平台要求（Windows / macOS / Linux 都要有 poppler） |
+| **O1** | ~~数字版 PDF 的版面分析走哪条技术路线？~~ | — | ✅ **已定（2026-11-12，v2.3）**：**poppler 的 `pdftohtml -xml`**（一次调用同时给页尺寸 / 文本 bbox / 内嵌图片 bbox，并抽出图片文件；实测见 §6.7）。⚠️ **跨平台要求**：Windows / macOS / Linux 都要有 poppler（`pdftohtml`）；**Windows 的补充实测待做**（用户 2026-11-12 明日验证） |
 | **O2** | ~~图片位置对扫描件怎么给？~~ | — | ✅ **已定（2026-11-12）**：**扫描件就是一张图** —— ZCode 为扫描页合成覆盖整页的 image 元素（`bbox = [0,0,1,1]`，`origin: "rendered"`）；页成分按识别到的文字判 `text` / `text+image` / `image` |
 | **O3** | ~~sidecar 里的文字放哪？~~ | — | ✅ **已定（2026-11-12）**：**sidecar 放逐元素文字，不放文档级全文**；markdown 正文仍是独立产物（`text.markdownPath`） |
 | **O4** | **内置工具投影（`capability-registry.md` §4.4）要不要跟 CLI 积木同批做？** | 步 1 之后 | ⏸ **暂未定**（用户 2026-11-12）。不同批则 agent 侧能力晚于业务侧。⚠️ **v2.1 连带项**：`packages/bootstrap/src/capability/`（D8 的装配位）**随 O4 一起做** —— CLI 命令面有自己的组合根，本批不经过 bootstrap |
@@ -616,3 +722,4 @@ sidecar 写入必须是「先写临时文件再 rename」（沿用 `ocr-local.md
 | | | ⚠️ **v2 修订清单**：① 统一 sidecar 版本 v1 → **v3**（v1/v2 是两个历史变体，已废止），补 §6.3 字段映射表；② `key` 从「未定义的取值」改为**积木 id 闭集** + 与注册表能力键的关系；③ 运维面（`doctor` / `models download`）单列契约，解决「退出码恒 0」与「unavailable ⇒ 1」的冲突；④ 分类规则补全为 8 行全枚举，页对象加 `status` 区分「失败页」与「空白页」；⑤ 缓存命中判据第 3、4 条写死（档位判据 + 积木所需产物判据）；⑥ 加**接力矩阵**，明确「inspect → parse **不重复调用引擎**」；⑦ sidecar 里的路径基准写死（相对 `artifactsDir`）；⑧ 加 §5.6 进度通道；⑨ 加 §4.3 前置依赖（poppler）；⑩ §11 步 0 补全架构登记清单；⑪ 加 §10.4 测试入口与落点；⑫ 同步旧 spec 引用（§9 表 + 步 6） |
 | **v2.1** | **2026-11-12** | **实施步 0–3 后的回写**：① 状态行改为「步 0–3 已实施，步 4 待 O1」；② §5.7 补 `ocr.parse` 的 `output` 形状定稿（`cached` / `sidecarPath` / `artifactsDir` / `artifacts`）；③ §4.1 / §6.2 的默认产物目录名订正为 `<源文件名>.mineru/`（**含扩展名**，与 `local-infra.md` §7.3 一致；原写的「去扩展名」是笔误）；④ §4.1 / §4.2 标注 `--force` / `--pdf-password` 已实施；⑤ §5.6 标注进度通道已实施；⑥ §11 步 0 清单订正为**实际登记的两个模块** + bootstrap 装配随 O4；⑦ §11 表加「状态」列。⚠️ **验收覆盖**：§10.1 全表 ⇒ `@zcode/cli` 的 `tests/ocr-command.test.ts`；§10.2 的分类 / 映射表 / 命中判据 / 接力（**parse → parse**）/ 指纹失效 / `--force` ⇒ `@zcode/core` 的 `tests/capability-ocr-sidecar.test.ts`；MinerU 产物 → 元素模型的提取 ⇒ `@zcode/adapters` 的 `tests/local-infra/document-model.test.ts`。**`inspect` 相关的接力行待步 4** |
 | **v2.2** | **2026-11-12** | **加密 PDF 路线落地 + v2.1 失实表述订正**：① ⚠️ **v2.1 说「`--pdf-password` 已实施、hint 与行为对得上」是错的** —— 实测 MinerU 4.1.7 **没有任何密码入口**（`mineru-kit parse <加密.pdf>` 报 `Failed to load document (PDFium: Incorrect password error).`；`mineru-kit parse --help` 无 `--password`；`mineru.parser.parse()` 与 `docvortex.document.pdf.PDFDocument.__init__` 无密码参数）⇒ 密码原先只到得了 poppler 的页数探测，**flag 被接受但对解析没有作用**；② 新路线：**端口在调引擎前探加密状态** —— 未给密码 ⇒ 直接报 `password_protected`（对外 `invalid_input`，hint 指向 `--pdf-password`），**不空跑一次引擎**；给了密码 ⇒ 先用 poppler `pdftocairo -pdf -upw/-opw` 解出**临时无密副本**再交给引擎，解析完即删（原文件不动、指纹仍取原文件）；③ 端口没有 poppler 时走兜底：引擎 stderr 里的 `Incorrect password` 同样归一成 `password_protected`；④ 契约层加 `LocalInfraErrorCode.password_protected` 与 `PdfDocumentPort.decryptToFile`；⑤ §4.3 前置依赖补「加密 PDF 需要 poppler 的 `pdftocairo`」；⑥ ⚠️ **修一个实测暴露的接线 bug**：`--pdf-password` 注册在**全局**旗标表，`run.ts` 的「只服务无头链路」作用域检查会把 `zcode ocr` 一起拦掉（症状：`--pdf-password can only be used with --prompt or --target.`）⇒ `zcode ocr` 命令组豁免该检查（回归见 `packages/cli/tests/pdf-password.test.ts`）。⚠️ **实测留痕**：同一份 PDF 的原文与解密副本分别过 MinerU，**元素模型逐项一致**（块类型 / bbox / `image_source` 全同）⇒ cairo 重编码对 OCR 产物无可见影响（实测结论，非保证）。路线细节见 [`ocr-local.md`](./ocr-local.md) §3.2.1 |
+| **v2.3** | **2026-11-12** | **O1 定案 + 步 4–5 落地。** ① **O1 的答案**：数字版 PDF 的原生分析走 **poppler 的 `pdftohtml -xml`** —— 一次调用同时给**页尺寸（pt）/ 文本块 bbox + 文本 / 内嵌图片 bbox**（并把图片抽成 PNG 落在产物目录），实测见 §6.7；② 新增 §6.7「原生分析路线的实现」与 §5.8「`ocr.inspect` 的 `output` 形状」；③ **路线自决**：每一页都有文本层 ⇒ 原生路线；有一页没有 ⇒ 整份文档走识别路线（宁可多算，不可漏页）；poppler 不可用 ⇒ 识别路线 + **一条明确的 warning**（不静默）；④ **原生路线没有质量档位**（`engine.tier = "native"`）⇒ §6.5 缓存判据 3 对它**不适用**（否则数字版 PDF 每次都「档位不符 ⇒ 重算」，缓存形同虚设）；⑤ **扫描页**补一张覆盖整页的 image 元素（`bbox = [0,0,1,1]`、`origin: "rendered"`）；⑥ **markdown 来源规则**：识别路线复用引擎的 markdown，原生路线按 §6.5 派生 `<artifactsDir>/markdown.md` 并回填 sidecar 的 `text.markdownPath`；⑦ §4.3 补 **poppler 是第三类依赖**与三个 poppler 二进制各管一段；⑧ §10 补 v2.3 的验收行（`inspect` 不返回正文 / 两条积木的产物面 / 原生路线 / 路线判定） |

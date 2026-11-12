@@ -51,6 +51,13 @@ export function createPasswordAwarePdfDocumentPort(
         deps.inner.renderPages(password ? { ...request, password } : request, options),
       );
     },
+    analyzeLayout(request, options) {
+      // ⚠️ **原生版面分析与读页同属「要打开 PDF」的动作** ⇒ 同一套解锁语义
+      // （缓存密码 → CLI 注入密码 → 问询）。
+      return withPasswordUnlock(deps, request, options?.signal, (password) =>
+        deps.inner.analyzeLayout(password ? { ...request, password } : request, options),
+      );
+    },
     decryptToFile(request, options) {
       // ⚠️ **解密不走问询解锁**：请求里**必定**已经带了密码（CLI 的 `--pdf-password`），
       // 问询拿到的是「读一页」的密码，语义不同；这里只做直通委托。

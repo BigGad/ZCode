@@ -6,6 +6,7 @@ import { createPopplerPdfDocumentAdapter } from "@zcode/adapters/pdf";
 import { loadOcrRuntimeSettings } from "@zcode/adapters/config";
 import { parseOcrArgs, type OcrCommandInput } from "./arguments.js";
 import { runDoctorCommand } from "./doctor-command.js";
+import { runInspectCommand } from "./inspect-command.js";
 import { runModelsDownloadCommand } from "./models-command.js";
 import { runParseCommand } from "./parse-command.js";
 import { OCR_EXIT_ERROR, OCR_EXIT_OK, type OcrContext } from "./output.js";
@@ -42,18 +43,20 @@ export const OCR_USAGE = `zcode ocr —— 本地 OCR / 文档解析能力面
 
 用法：
   zcode ocr doctor [--json]
+  zcode ocr inspect --path <文件> [--output <目录>] [--force] [--pdf-password <密码>] [--json]
   zcode ocr parse --path <文件> [--output <目录>] [--tier <档位>] [--force] [--pdf-password <密码>] [--json]
   zcode ocr models download --tier <basic|standard> [--source <源>] [--json]
 
 子命令：
   doctor           本地解析引擎体检（只读，不下载任何权重）
+  inspect          只出页成分 + 元素位置（**不返回文字正文**，不产出 markdown）
   parse            解析一份 PDF 或图片，产物落盘到工作区
   models download  下载指定档位的模型权重
 
 旗标：
-  --path <文件>    待解析文件（parse 必填）
+  --path <文件>    待解析文件（inspect / parse 必填）
   --output <目录>  产物输出目录（默认 <源文件名>.mineru/）
-  --tier <档位>    解析档位：flash / basic / standard / advanced
+  --tier <档位>    解析档位：flash / basic / standard / advanced（**只有 parse 有**）
   --source <源>    模型源：auto / huggingface / modelscope
   --force          忽略 sidecar 缓存，强制重算并覆盖
   --pdf-password <密码>  加密 PDF 的密码（只经 argv 传递，不落盘、不入日志）
@@ -69,6 +72,8 @@ export const OCR_USAGE = `zcode ocr —— 本地 OCR / 文档解析能力面
 说明：
   - ZCode 只检测并调用本机已装好的 MinerU，不负责安装（引擎与 Python 环境由用户自装）。
   - 引擎不可用时 doctor 会给出装法；解析时按档位链降级并在 warnings 中告知。
+  - 路线由输入自决：数字版 PDF 走 PDF 原生分析（需要 poppler，不烧权重），
+    扫描件 / 图片走识别路线；inspect 的 output.engine 会告诉业务这次走的是哪条。
   - --json 时 stdout 只有信封一个 JSON 对象，进度走 stderr（每行一个 NDJSON 事件）。
 `;
 
@@ -97,6 +102,14 @@ export async function runOcrCommand(
     switch (command.kind) {
       case "doctor":
         return await runDoctorCommand(ctx, runtime.port, { json: command.json });
+      case "inspect":
+        return await runInspectCommand(ctx, runtime.port, runtime.fileSystem, {
+          json: command.json,
+          path: command.path,
+          ...(command.output !== undefined ? { output: command.output } : {}),
+          ...(command.force !== undefined ? { force: command.force } : {}),
+          ...(command.pdfPassword !== undefined ? { pdfPassword: command.pdfPassword } : {}),
+        });
       case "parse":
         return await runParseCommand(ctx, runtime.port, runtime.fileSystem, {
           json: command.json,

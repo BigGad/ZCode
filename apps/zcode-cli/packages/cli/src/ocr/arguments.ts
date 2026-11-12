@@ -36,6 +36,16 @@ export interface OcrCommandInput {
 export type OcrCommand =
   | { readonly kind: "doctor"; readonly json: boolean }
   | {
+      readonly kind: "inspect";
+      readonly json: boolean;
+      readonly path: string;
+      readonly output?: string;
+      /** `--force`：忽略 sidecar 缓存，强制重算。 */
+      readonly force?: boolean;
+      /** `--pdf-password`：加密 PDF 的密码（argv only）。 */
+      readonly pdfPassword?: string;
+    }
+  | {
       readonly kind: "parse";
       readonly json: boolean;
       readonly path: string;
@@ -79,6 +89,31 @@ export function parseOcrArgs(input: OcrCommandInput): OcrCommand {
       return { kind: "error", message: `doctor 不接受旗标：${unexpected.join("、")}` };
     }
     return { kind: "doctor", json: input.json };
+  }
+
+  if (command === "inspect") {
+    const extra = input.positionals[1];
+    if (extra !== undefined) {
+      return { kind: "error", message: `inspect 只接受 --path 指定输入，不接受位置参数：${extra}` };
+    }
+    // ⚠️ **`inspect` 没有 `--tier`**（spec §4.2）：它只出页成分 + 元素位置，
+    // 档位是识别路线的概念，原生分析路线压根不烧权重。
+    const unexpected = unexpectedFlags(flags, ["path", "output", "force", "pdf-password"]);
+    if (unexpected.length > 0) {
+      return { kind: "error", message: `inspect 不接受旗标：${unexpected.join("、")}` };
+    }
+    const path = flags.path;
+    if (path === undefined || path.trim() === "") {
+      return { kind: "error", message: "inspect 需要 --path <file>" };
+    }
+    return {
+      kind: "inspect",
+      json: input.json,
+      path,
+      ...(flags.output !== undefined ? { output: flags.output } : {}),
+      ...(flags.force === true ? { force: true } : {}),
+      ...(flags.pdfPassword !== undefined ? { pdfPassword: flags.pdfPassword } : {}),
+    };
   }
 
   if (command === "parse") {

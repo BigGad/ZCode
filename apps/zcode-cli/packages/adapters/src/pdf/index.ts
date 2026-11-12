@@ -1,22 +1,26 @@
-import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   PdfDocumentPortError,
   READ_PDF_AVAILABILITY_TIMEOUT_MS,
   READ_PDF_DECRYPT_TIMEOUT_MS,
   READ_PDF_INFO_TIMEOUT_MS,
+  READ_PDF_LAYOUT_TIMEOUT_MS,
   READ_PDF_MAX_PAGES_PER_REQUEST,
   READ_PDF_RENDER_TIMEOUT_MS,
   type ExecutionPort,
   type ExecutionResult,
+  type PdfDocumentAnalyzeLayoutRequest,
   type PdfDocumentDecryptRequest,
   type PdfDocumentDecryptedFile,
   type PdfDocumentPageCountRequest,
   type PdfDocumentPort,
   type PdfDocumentRenderPagesRequest,
   type PdfDocumentRenderedPage,
+  type PdfLayoutAnalysis,
 } from "@zcode/contracts";
+import { PDFTOHTML_OUTPUT_BASENAME, parsePdftohtmlXml } from "./layout-xml.js";
 
 export interface PopplerPdfDocumentAdapterOptions {
   executionPort: ExecutionPort;
@@ -37,6 +41,8 @@ const INCORRECT_PASSWORD_PATTERN = /incorrect password/iu;
 const PDFCAIRO_BINARY = "pdftocairo";
 /** poppler 的渲染（`pdftoppm`）。 */
 const PDFTOPPM_BINARY = "pdftoppm";
+/** poppler 的原生版面分析（`pdftohtml -xml`）。 */
+const PDFTOHTML_BINARY = "pdftohtml";
 
 export function createPopplerPdfDocumentAdapter(
   options: PopplerPdfDocumentAdapterOptions,
@@ -60,7 +66,9 @@ class PopplerPdfDocumentAdapter implements PdfDocumentPort {
           mode: "argv",
           file: "pdfinfo",
           // 密码仅经 argv 传给子进程（poppler 无 stdin/env 通道）；ps 可见性在 spec 安全节已声明。
-          args: request.password ? ["-upw", request.password, request.filePath] : [request.filePath],
+          args: request.password
+            ? ["-upw", request.password, request.filePath]
+            : [request.filePath],
         },
         timeoutMs: READ_PDF_INFO_TIMEOUT_MS,
         trace: request.trace,
@@ -250,6 +258,82 @@ class PopplerPdfDocumentAdapter implements PdfDocumentPort {
     const bytes = await decryptedFileSize(request.outputPath, options?.signal);
     return { path: request.outputPath, bytes };
   }
+
+  /**
+   * **原生版面分析**：从 PDF 的文本层与内嵌图对象拿页尺寸 + 元素位置 + 文本内容。
+   *
+   * ⚠️ 走 poppler 的 `pdftohtml -xml`（实测见 spec §6.7）：一次调用同时给出
+   * 页尺寸（pt）、文本碎片 bbox + 文本、内嵌图片 bbox，并把内嵌图片抽成 PNG
+   * 落在 `outputDir` 里。
+   * ⚠️ **加密 PDF 直接支持**（poppler 的 `-upw` / `-opw`）⇒ 不需要解密副本。
+   */
+  async analyzeLayout(
+    request: PdfDocumentAnalyzeLayoutRequest,
+    options?: { signal?: AbortSignal },
+  ): Promise<PdfLayoutAnalysis> {
+    await this.ensureBinaryAvailable(request, PDFTOHTML_BINARY, options?.signal);
+    try {
+      await mkdir(request.outputDir, { recursive: true });
+    } catch (error) {
+      throwPdfIoError(
+        error,
+        options?.signal,
+        "Unable to create the PDF analysis output directory.",
+      );
+    }
+    const xmlPath = join(request.outputDir, `${PDFTOHTML_OUTPUT_BASENAME}.xml`);
+    const runAnalysis = (passwordFlag: "-upw" | "-opw") =>
+      this.options.executionPort.run(
+        {
+          command: {
+            mode: "argv",
+            file: PDFTOHTML_BINARY,
+            args: [
+              "-xml",
+              // ⚠️ `-zoom 1` ⇒ 坐标单位是 pt（1/72 英寸）；`-noroundcoord` 保留小数。
+              "-zoom",
+              "1",
+              "-noroundcoord",
+              // ⚠️ `-hidden` 带上隐藏层的文本；`-nodrm` 不画水印；`-q` 安静模式。
+              "-hidden",
+              "-nodrm",
+              "-q",
+              // ⚠️ **密码只经 argv**（poppler 没有 stdin / env 通道）。
+              ...(request.password !== undefined ? [passwordFlag, request.password] : []),
+              request.filePath,
+              xmlPath,
+            ],
+          },
+          timeoutMs: READ_PDF_LAYOUT_TIMEOUT_MS,
+          trace: request.trace,
+        },
+        options?.signal ? { signal: options.signal } : undefined,
+      );
+
+    let result = await runAnalysis("-upw");
+    try {
+      assertLayoutSucceeded(result, request);
+    } catch (error) {
+      // 仅密码类失败值得换 owner-password 变体重试一次；其他失败重试只会重复成本。
+      if (
+        !request.password ||
+        !(error instanceof PdfDocumentPortError) ||
+        error.code !== "password_protected"
+      ) {
+        throw error;
+      }
+      result = await runAnalysis("-opw");
+      assertLayoutSucceeded(result, request);
+    }
+
+    let xml: string;
+    try {
+      xml = await readFile(xmlPath, "utf8");
+    } catch (error) {
+      throwPdfIoError(error, options?.signal, "Unable to read the PDF layout analysis output.");
+    }
+    return parsePdftohtmlXml(xml, { xmlDirectory: dirname(xmlPath) });
+  }
 }
 
 /** 副本落盘后的存在性与体积校验（拿不到就不是一次成功的解密）。 */
@@ -373,6 +457,45 @@ function assertRenderSucceeded(
   throw new PdfDocumentPortError(
     "process_failed",
     detail.length > 0 ? `pdftoppm failed: ${detail}` : "pdftoppm failed.",
+    { cause: result.error?.cause },
+  );
+}
+
+/** `pdftohtml` 的失败归类：密码 / 损坏 / 其它。 */
+function assertLayoutSucceeded(
+  result: ExecutionResult,
+  request: PdfDocumentAnalyzeLayoutRequest,
+): void {
+  if (result.cancelled) {
+    throw new PdfDocumentPortError("cancelled", "PDF layout analysis was cancelled.");
+  }
+  if (result.timedOut || result.status === "timed_out") {
+    throw new PdfDocumentPortError(
+      "timeout",
+      `PDF layout analysis timed out after ${READ_PDF_LAYOUT_TIMEOUT_MS}ms.`,
+    );
+  }
+  if (result.status === "completed" && result.exitCode === 0) return;
+
+  const stderr = result.stderr.text;
+  if (INCORRECT_PASSWORD_PATTERN.test(stderr) || /password/iu.test(stderr)) {
+    throw new PdfDocumentPortError(
+      "password_protected",
+      request.password
+        ? "PDF password was rejected; the password may be incorrect."
+        : "PDF is password-protected. A password is required to open it.",
+    );
+  }
+  if (/damaged|corrupt|invalid/iu.test(stderr) || BROKEN_PDF_STRUCTURE_PATTERN.test(stderr)) {
+    throw new PdfDocumentPortError("corrupted", "PDF file is corrupted or invalid.");
+  }
+  const detail = [stderr, result.stdout.text, result.error?.message]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join("\n")
+    .trim();
+  throw new PdfDocumentPortError(
+    "process_failed",
+    detail.length > 0 ? `pdftohtml failed: ${detail}` : "pdftohtml failed.",
     { cause: result.error?.cause },
   );
 }

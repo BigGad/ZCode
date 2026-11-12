@@ -125,6 +125,23 @@ export interface CapabilityProgressEvent {
  */
 export const OCR_SIDECAR_VERSION = 3;
 
+/**
+ * 原生分析路线的标识（写进 sidecar 的 `engine.name` / `engine.route`，
+ * 也是 `ocr.inspect` / `ocr.parse` 的 `output.engine` 取值）。
+ *
+ * ⚠️ **定义在 contracts 是因为三方都要用**：adapter 判路线、core 判缓存、
+ * 命令面投影输出 —— 三份各写一遍字面量必然漂移。
+ */
+export const OCR_NATIVE_ANALYSIS_ROUTE = "pdf-native";
+
+/**
+ * 原生分析路线的档位名（写进 sidecar 的 `engine.tier`）。
+ *
+ * ⚠️ **原生路线没有质量档位**（不烧权重）⇒ 用一个固定值占位，
+ * 免得业务把 `"native"` 当成某个档位去比较。
+ */
+export const OCR_NATIVE_ANALYSIS_TIER = "native";
+
 /** 元素分类（spec §6.4）。分类由**映射表**得出，不直接比较 `type` 字符串。 */
 export const OCR_ELEMENT_CATEGORIES = ["text", "image", "other"] as const;
 

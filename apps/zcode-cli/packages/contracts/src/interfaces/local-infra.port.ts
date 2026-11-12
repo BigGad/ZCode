@@ -10,6 +10,23 @@ import type { PdfDocumentPort } from "./pdf-document.port.js";
 export type LocalEngineId = "mineru";
 
 /**
+ * 调用方要求的**解析路线**。
+ *
+ * ⚠️ `"auto"` = **路线自决**（积木层的用法）：文档每页都有文本层 ⇒ 原生分析路线；
+ * 否则 ⇒ 识别路线。**业务方不指定路线**（spec：capability-cli-blocks.md §3.1）。
+ * ⚠️ 缺省是 `"mineru"` —— runtime 的附件 OCR 一直走识别路线（不改它的行为）。
+ */
+export type LocalParseRoute = "auto" | "mineru";
+
+/**
+ * **实际走的**路线。
+ *
+ * - `"pdf-native"`：PDF 原生分析（poppler 的 `pdftohtml -xml`）—— 不烧权重；
+ * - `"mineru"`：识别路线（MinerU + 权重）。
+ */
+export type LocalAnalysisRoute = "pdf-native" | "mineru";
+
+/**
  * MinerU 的四档枚举。⚠️ 集合**不能硬编码成三档**：实测
  * `mineru-kit hardware detect --json` 的 `pdf_image_tiers` 是
  * `["flash","basic","standard","advanced"]`，其中 `flash` 官方文档从未出现过。
@@ -90,7 +107,16 @@ export type LocalInfraErrorCode =
    * ⇒ 由 ZCode 侧在调引擎前判定（spec：docs/design/v2/ocr-local.md §3.2.1），
    * 对外归一为 `invalid_input`。
    */
-  | "password_protected";
+  | "password_protected"
+  /**
+   * 文档本身损坏（不是有效的 PDF）。
+   *
+   * ⚠️ 原生分析路线能直接认出这个情形（poppler 的报错比引擎的清楚）⇒ 对外归一为
+   * `invalid_input`（**不是** `not_found` —— 文件在，只是坏了）。
+   */
+  | "document_corrupted"
+  /** 没有权限读文件。 */
+  | "permission_denied";
 
 export interface LocalInfraError {
   /** 内部码；对外归一由能力层做。 */
@@ -255,6 +281,12 @@ export interface LocalParseRequest {
    * ⚠️ **只经 argv 传递，不落盘、不入日志、不进事件**（同 `pdf-document.port.ts` 的约定）。
    */
   readonly password?: string;
+  /**
+   * 解析路线；缺省 `"mineru"`。
+   * ⚠️ `"auto"` 时端口**自己判定**（原生分析 vs 识别），并把实际路线回填到
+   * `LocalParseResult.route`（spec：capability-cli-blocks.md §3.1 / §6.7）。
+   */
+  readonly route?: LocalParseRoute;
 }
 
 export interface LocalParseOutput {
@@ -280,6 +312,12 @@ export interface LocalParseOutput {
 export interface LocalParseResult {
   readonly ok: boolean;
   readonly engine?: LocalEngineId;
+  /**
+   * **实际走的**路线（`"auto"` 请求下才有值）。
+   * ⚠️ 原生分析路线下 `engine` **不给值**（引擎没参与，这个字段的类型里也只有
+   * `"mineru"`）⇒ 要看路线看这个字段，要看引擎名看 `OCR_NATIVE_ANALYSIS_ROUTE`。
+   */
+  readonly route?: LocalAnalysisRoute;
   /**
    * ⚠️ **从产物回填**（`extensions.mineru.tier`），不是回填请求值：
    * ZCode 传的 `--tier` 可能被 MinerU 内部改写，权威值在产物里。

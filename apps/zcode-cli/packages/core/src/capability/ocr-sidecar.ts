@@ -4,6 +4,7 @@
 
 import { basename, dirname, join } from "node:path";
 import {
+  OCR_NATIVE_ANALYSIS_ROUTE,
   OCR_SIDECAR_VERSION,
   type LocalDocumentElement,
   type LocalDocumentPage,
@@ -198,7 +199,14 @@ export function evaluateOcrSidecarCache(
   if (sidecar.source.sha256 !== criteria.sourceSha256) {
     return { hit: false, reason: "源文件内容已变化，缓存失效", tier };
   }
-  if (criteria.tier !== undefined && sidecar.engine.tier !== criteria.tier) {
+  if (
+    criteria.tier !== undefined &&
+    sidecar.engine.tier !== criteria.tier &&
+    // ⚠️ **原生分析路线没有质量档位**（spec §6.5 判据 3 的 v2.3 例外）：
+    // 它不烧权重，档位对它没有意义 ⇒ 判据不适用。
+    // ⚠️ 若照字面执行，数字版 PDF 每次都会「档位不符 ⇒ 重算」，缓存形同虚设。
+    sidecar.engine.route !== OCR_NATIVE_ANALYSIS_ROUTE
+  ) {
     return {
       hit: false,
       reason: `sidecar 的档位是 ${sidecar.engine.tier}，与请求的 ${criteria.tier} 不一致，需要重算`,

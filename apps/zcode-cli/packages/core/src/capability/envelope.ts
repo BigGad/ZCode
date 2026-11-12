@@ -82,6 +82,11 @@ function capabilityErrorCodeFor(error: LocalInfraError): CapabilityErrorCode {
     case "password_protected":
       // 加密 PDF：密码被拒或压根没给 ⇒ 输入本身不满足解析前提，不是引擎故障。
       return "invalid_input";
+    case "document_corrupted":
+      // 文档坏了 ⇒ 输入不合法（**不是** not_found —— 文件在，只是读不出内容）。
+      return "invalid_input";
+    case "permission_denied":
+      return "permission_denied";
   }
 }
 

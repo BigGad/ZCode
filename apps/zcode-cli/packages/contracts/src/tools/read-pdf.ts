@@ -11,6 +11,11 @@ export const READ_PDF_AVAILABILITY_TIMEOUT_MS = 5_000;
 export const READ_PDF_RENDER_TIMEOUT_MS = 120_000;
 /** 解密（`pdftocairo -pdf`）的超时上限：整份文档重编码，比取页数慢。 */
 export const READ_PDF_DECRYPT_TIMEOUT_MS = 120_000;
+/**
+ * 原生版面分析（`pdftohtml -xml`）的超时上限：整份文档出文本层 + 内嵌图 bbox，
+ * 比取页数慢、比整页渲染快。
+ */
+export const READ_PDF_LAYOUT_TIMEOUT_MS = 120_000;
 export const READ_PDF_PAGES_DESCRIPTION =
   'Page range for PDF files (e.g., "1-5", "3", "10-20"). Only applicable to PDF files. Maximum 20 pages per request.';
 

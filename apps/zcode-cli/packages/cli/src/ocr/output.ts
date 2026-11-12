@@ -80,3 +80,22 @@ function createTextReporter(ctx: OcrContext): OcrReporter {
 export function exitCodeForEnvelope(envelope: CapabilityEnvelope): number {
   return envelope.ok ? OCR_EXIT_OK : exitCodeForCapabilityError(envelope.error.code);
 }
+
+/**
+ * 写信封（`--json`）或人读报告，并返回退出码。
+ *
+ * ⚠️ **人读报告由调用方给** —— `inspect` 与 `parse` 的报告形状不同（页成分 vs 产物引用）。
+ */
+export function emitEnvelope(
+  ctx: OcrContext,
+  json: boolean,
+  envelope: CapabilityEnvelope,
+  writeTextReport: (envelope: CapabilityEnvelope) => string,
+): number {
+  if (json) {
+    writeEnvelope(ctx, envelope);
+  } else {
+    ctx.stdout.write(writeTextReport(envelope));
+  }
+  return exitCodeForEnvelope(envelope);
+}

@@ -148,6 +148,38 @@ function successfulParseResult(): LocalParseResult {
   };
 }
 
+/**
+ * 原生分析路线的解析结果（`route = "pdf-native"`）。
+ *
+ * ⚠️ **没有 `markdownPath`** —— 原生路线没有引擎产物，markdown 由 ZCode 从元素派生。
+ */
+function nativeParseResult(): LocalParseResult {
+  return {
+    ok: true,
+    route: "pdf-native",
+    output: {
+      outputDir: ARTIFACTS_DIR,
+      documentModel: {
+        pages: [
+          {
+            pageIndex: 0,
+            widthPt: 595,
+            heightPt: 842,
+            status: "ok",
+            elements: [
+              { type: "text", bbox: [0.1, 0.02, 0.38, 0.03], text: "本地 OCR 路线验证" },
+              { type: "image", bbox: [0.08, 0.12, 0.42, 0.3], imagePath: "layout-1_1.png" },
+            ],
+          },
+        ],
+        producer: { name: "pdf-native", version: "26.09.0" },
+      },
+    },
+    warnings: ["文档每一页都有文本层，走 PDF 原生分析路线（不消耗模型权重）"],
+    durationMs: 8,
+  };
+}
+
 /** 构造命令组输入：位置参数 + 旗标 + `--json` / `--help`。 */
 function input(
   positionals: readonly string[],
@@ -506,6 +538,149 @@ test("sidecar 命中时不重跑引擎（接力）", async () => {
   // ⚠️ 没给 --tier 时命中任意档位，但业务要看得见实际用的是哪一档。
   assert.equal(payload.output?.tier, "basic");
   assert.ok(payload.metrics?.warnings?.some((warning) => warning.includes("档位 basic")));
+});
+
+test("inspect 的输出只有页成分与元素位置，**没有文字正文**", async () => {
+  const result = await runOcr(input(["inspect"], { path: SOURCE_PATH }, { json: true }));
+
+  assert.equal(result.exitCode, 0);
+  const payload = envelopeOf(result.stdout);
+  assert.equal(payload.key, "ocr.inspect");
+  assert.equal(payload.output?.cached, false);
+  assert.equal(payload.output?.sidecarPath, SIDECAR_PATH);
+  assert.equal(payload.output?.artifactsDir, "report.pdf.mineru");
+
+  const pages = payload.output?.pages as {
+    pageIndex: number;
+    composition: string | null;
+    elements: Record<string, unknown>[];
+  }[];
+  assert.equal(pages.length, 1);
+  assert.equal(pages[0]?.composition, "text+image");
+  // ⚠️ **元素不带 `text`**（spec §5.8）—— 这是 inspect 与 parse 的唯一区别。
+  assert.equal("text" in (pages[0]?.elements[0] ?? {}), false);
+  assert.equal(pages[0]?.elements[0]?.category, "text");
+  assert.equal(pages[0]?.elements[1]?.category, "image");
+  assert.equal(pages[0]?.elements[1]?.imagePath, "images/p0.jpg");
+  // ⚠️ inspect **不产出 markdown**（没有 artifacts 字段）。
+  assert.equal(payload.output?.artifacts, undefined);
+});
+
+test("inspect 的 sidecar 里仍然带逐元素文字（parse 接力的前提）", async () => {
+  const result = await runOcr(input(["inspect"], { path: SOURCE_PATH }, { json: true }));
+
+  const written = result.fileSystem.writes.find((write) => write.path === SIDECAR_PATH);
+  assert.ok(written, "必须写 sidecar");
+  const sidecar = JSON.parse(written.content) as {
+    text?: { markdownPath?: string };
+    pages: { elements: { category: string; text?: string }[] }[];
+  };
+  assert.equal(sidecar.pages[0]?.elements[0]?.text, "第一段");
+  // ⚠️ inspect 不产出 markdown ⇒ sidecar 里没有 text 段。
+  assert.equal(sidecar.text, undefined);
+});
+
+test("组合校验：inspect 需要 --path，且不接受 --tier", async () => {
+  const missing = await runOcr(input(["inspect"]));
+  assert.equal(missing.exitCode, 1);
+  assert.match(missing.stderr, /inspect 需要 --path/);
+
+  // ⚠️ **inspect 没有 --tier**（spec §4.2）：档位是识别路线的概念。
+  const tiered = await runOcr(input(["inspect"], { path: SOURCE_PATH, tier: "basic" }));
+  assert.equal(tiered.exitCode, 1);
+  assert.match(tiered.stderr, /inspect 不接受旗标/);
+});
+
+test("接力：inspect 之后调 parse ⇒ 命中缓存，引擎不再被调用", async () => {
+  const fileSystem = fileSystemWithSource();
+  const stub = stubPort({});
+
+  const first = await runOcr(input(["inspect"], { path: SOURCE_PATH }, { json: true }), {
+    fileSystem,
+    stub,
+  });
+  assert.equal(first.exitCode, 0);
+  assert.equal(stub.parseCalls.length, 1);
+
+  const second = await runOcr(input(["parse"], { path: SOURCE_PATH }, { json: true }), {
+    fileSystem,
+    stub,
+  });
+  assert.equal(second.exitCode, 0);
+  assert.equal(stub.parseCalls.length, 1, "接力时不得再调引擎");
+  const payload = envelopeOf(second.stdout);
+  assert.equal(payload.output?.cached, true);
+  // ⚠️ **markdown 从 sidecar 的元素派生**（inspect 没产出过 markdown）。
+  assert.equal((payload.output?.artifacts as Record<string, string>).markdownPath, "markdown.md");
+});
+
+test("接力：parse 之后调 inspect ⇒ 命中缓存", async () => {
+  const fileSystem = fileSystemWithSource();
+  const stub = stubPort({});
+
+  await runOcr(input(["parse"], { path: SOURCE_PATH }, { json: true }), { fileSystem, stub });
+  const second = await runOcr(input(["inspect"], { path: SOURCE_PATH }, { json: true }), {
+    fileSystem,
+    stub,
+  });
+
+  assert.equal(second.exitCode, 0);
+  assert.equal(stub.parseCalls.length, 1, "接力时不得再调引擎");
+  assert.equal(envelopeOf(second.stdout).output?.cached, true);
+});
+
+test("原生分析路线：引擎名是 pdf-native、档位是 native，markdown 由元素派生", async () => {
+  const result = await runOcr(input(["parse"], { path: SOURCE_PATH }, { json: true }), {
+    parse: nativeParseResult(),
+  });
+
+  assert.equal(result.exitCode, 0);
+  const payload = envelopeOf(result.stdout);
+  assert.equal(payload.output?.engine, "pdf-native");
+  assert.equal(payload.output?.tier, "native");
+  assert.equal((payload.output?.artifacts as Record<string, string>).markdownPath, "markdown.md");
+
+  // ⚠️ 派生的 markdown 落进产物目录，并回填进 sidecar。
+  const markdown = result.fileSystem.writes.find((write) =>
+    write.path.endsWith("/report.pdf.mineru/markdown.md"),
+  );
+  assert.ok(markdown, "必须派生 markdown");
+  assert.match(markdown.content, /本地 OCR 路线验证/);
+  const sidecarWrite = result.fileSystem.writes.find((write) => write.path === SIDECAR_PATH);
+  const sidecar = JSON.parse(sidecarWrite!.content) as {
+    engine: { name: string; tier: string; route: string };
+    text?: { markdownPath?: string };
+  };
+  assert.equal(sidecar.engine.name, "pdf-native");
+  assert.equal(sidecar.engine.tier, "native");
+  assert.equal(sidecar.engine.route, "pdf-native");
+  assert.equal(sidecar.text?.markdownPath, "markdown.md");
+});
+
+test("原生分析路线：inspect 的输出里引擎名与档位也是原生分析的值", async () => {
+  const result = await runOcr(input(["inspect"], { path: SOURCE_PATH }, { json: true }), {
+    parse: nativeParseResult(),
+  });
+
+  assert.equal(result.exitCode, 0);
+  const payload = envelopeOf(result.stdout);
+  assert.equal(payload.output?.engine, "pdf-native");
+  assert.equal(payload.output?.tier, "native");
+});
+
+test("原生分析路线：请求给了 --tier 也照样命中缓存（档位判据不适用）", async () => {
+  const fileSystem = fileSystemWithSource();
+  const stub = stubPort({ parse: nativeParseResult() });
+
+  await runOcr(input(["parse"], { path: SOURCE_PATH }, { json: true }), { fileSystem, stub });
+  const second = await runOcr(
+    input(["parse"], { path: SOURCE_PATH, tier: "basic" }, { json: true }),
+    { fileSystem, stub },
+  );
+
+  assert.equal(second.exitCode, 0);
+  assert.equal(stub.parseCalls.length, 1, "原生路线不该因为档位不符而重算");
+  assert.equal(envelopeOf(second.stdout).output?.cached, true);
 });
 
 test("源文件内容变了 ⇒ 缓存失效，重新解析", async () => {

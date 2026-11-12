@@ -218,6 +218,25 @@ describe("缓存判据（spec §6.5）", () => {
     expect(decision.tier).toBe("basic");
   });
 
+  it("原生分析路线没有质量档位 ⇒ 档位判据不适用（v2.3 例外）", () => {
+    // ⚠️ 原生路线不烧权重，档位对它没有意义 ⇒ 照字面执行判据会让数字版 PDF
+    // 每次都「档位不符 ⇒ 重算」，缓存形同虚设（spec §6.5 判据 3 的 v2.3 例外）。
+    const native = sidecar({
+      engine: {
+        name: "pdf-native",
+        variant: "pdf-native",
+        version: "26.09.0",
+        tier: "native",
+        route: "pdf-native",
+        assets: {},
+      },
+    });
+
+    const decision = evaluateOcrSidecarCache(native, { ...criteria, tier: "basic" });
+    expect(decision.hit).toBe(true);
+    expect(decision.tier).toBe("native");
+  });
+
   it("需要文字但文本元素没有 text ⇒ 未命中", () => {
     const broken = {
       ...sidecar(),

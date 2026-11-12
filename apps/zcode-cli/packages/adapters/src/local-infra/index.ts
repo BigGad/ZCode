@@ -16,6 +16,7 @@ import type {
   MineruTier,
 } from "@zcode/contracts";
 import { extractZipArchive } from "../fs/zip-extract.js";
+import { analyzeDocument } from "./analyze.js";
 import { prepareOutputDir, readDocumentModelFromFile, scanArtifacts } from "./artifact-store.js";
 import {
   HARDWARE_DETECT_TIMEOUT_MS,
@@ -145,8 +146,24 @@ class LocalInfraAdapter implements LocalInfraPort {
    * ⚠️ **只 spawn 一次** `mineru-kit parse`（一次付冷启动），三件套一次取全。
    * ⚠️ **绝不构造 `--remote` / `--remote-url` / `--api-key`**：本地基础设施这个产品承诺
    * 不能被静默打破，远程解析会把文档送出本机。
+   * ⚠️ **`route: "auto"` 时走路线自决**（原生分析 vs 识别，见 analyze.ts）；
+   * 缺省仍是识别路线 —— runtime 的附件 OCR 一直走识别路线，不改它的行为。
    */
   async parse(request: LocalParseRequest): Promise<LocalParseResult> {
+    if (request.route === "auto") {
+      return await analyzeDocument(
+        {
+          ...(this.deps.pdf !== undefined ? { pdf: this.deps.pdf } : {}),
+          parseWithEngine: (engineRequest) => this.parseWithEngine(engineRequest),
+        },
+        request,
+      );
+    }
+    return await this.parseWithEngine(request);
+  }
+
+  /** 识别路线（MinerU）的执行体。 */
+  private async parseWithEngine(request: LocalParseRequest): Promise<LocalParseResult> {
     const startedAt = Date.now();
     const warnings: string[] = [];
     const inputPath = resolve(request.path);
