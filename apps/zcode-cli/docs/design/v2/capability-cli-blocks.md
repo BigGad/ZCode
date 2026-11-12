@@ -1,6 +1,7 @@
 # 能力积木 CLI（业务侧积木模型）
 
-Status: **规划稿 v2**（2026-11-12）：形态已与用户对齐定稿，**代码未实现**。
+Status: **规划稿 v2.2**（2026-11-12）：形态已与用户对齐定稿；**步 0–3 已实施**（统一信封 + 错误码闭集、`zcode ocr` 的信封迁移与 stderr 分流、sidecar v3 与缓存接力）；**`--pdf-password` 的加密 PDF 路线已落地**（v2.2 订正 v2.1 的失实表述）。
+⚠️ **步 4（`zcode ocr inspect`）未开工** —— 依赖 §12 的 O1（数字版 PDF 原生分析的技术路线）未决。
 ⚠️ 本 spec **推翻** [`capability-registry.md`](./capability-registry.md) §4.2 的「统一执行面 `zcode cap run` + 不新增子命令路由到每个能力」，并**修订** [`ocr-local.md`](./ocr-local.md) §6.1 / §6.1.1（sidecar 格式）与 §6.5（交付形态）。冲突处以本 spec 为准。
 
 ## 1. 目的与范围
@@ -42,7 +43,7 @@ zcode 一侧只保证三件事：
 | **D5** | **积木间接力靠 sidecar 缓存**，业务**只传原始路径**，不手搬上一步的产物路径 | 业务代码极简；天然幂等（重试不重复烧一次识别）；缓存命中与接力是同一件事 |
 | **D6** | **统一信封 + 统一退出码**，所有**业务积木**一套 | 业务要写**一套**解析器吃所有业务积木的输出 |
 | **D7** | **sidecar 格式归 zcode 定、与引擎无关**；引擎原生产物降级为调试副产物 | 业务一旦直接读 MinerU 的产物格式，换引擎 / 升 MinerU 时业务解析代码全废 |
-| **D8** | **包层位走路线 (a) 契约下沉**：契约进 `packages/contracts/src/capability-blocks/`，实现进 `packages/core/src/capability/`，装配进 `packages/bootstrap/` | 不新增架构层、不改 `architecture.md`；`core → contracts` 合规 |
+| **D8** | **包层位走路线 (a) 契约下沉**：契约进 `packages/contracts/src/capability-blocks/`，实现进 `packages/core/src/capability/`，装配进 `packages/bootstrap/` | 不新增架构层、不改 `architecture.md`；`core → contracts` 合规。⚠️ **v2.1：bootstrap 装配随内置工具投影（O4）一起做** —— CLI 命令面有**自己的组合根**（`packages/cli/src/ocr/index.ts`），本批不经过 bootstrap |
 | **D9** | **页成分给第四态 `empty`**（空白页） | 只给「纯文本 / 纯图片 / 文本+图片」三态时，空白页要靠「没有元素」反推 |
 | **D10** | **引擎与 Python 环境由用户自装**；ZCode 只备**权重 / 语言包**等资产 | 沿用 [`local-infra.md`](./local-infra.md) §3.1 |
 | **D11** | **自动备资产默认开**（`ocr.autoProvision` 默认 `true`） | 产品承诺是「ZCode 自己把能力拉起来，用户不感知命令」 |
@@ -50,7 +51,7 @@ zcode 一侧只保证三件事：
 | **D13** | **信封 `key` = 积木 id**（`<族>.<动词>`），取值是**闭集**；它与注册表能力键（`ocr`）是**两个命名空间** | 业务要按 `key` 分支；取值必须可校验、可枚举。⇒ 见 §5.1 的闭集与对照表 |
 | **D14** | **运维面动词（`doctor` / `models download`）单列契约**：`doctor` 恒 `ok: true`、退出码恒 0 | 体检报告本身就是结果（[`local-infra.md`](./local-infra.md) §7.4 已定），与「引擎不可用 ⇒ 退出码 1」冲突，必须分开 |
 | **D15** | **积木要有进度**：进度事件走 **stderr**，业务逐行可解析 | OCR 可能是分钟级（备权重 + 识别）；业务同步等一个长命令时无从判断死活（O5 已定） |
-| **D16** | **`zcode ocr` 积木收 `--pdf-password`**（只经 argv） | 加密 PDF 在积木形态下要有路；密码只经 argv、不落盘、不入日志 |
+| **D16** | **`zcode ocr` 积木收 `--pdf-password`**（只经 argv） | 加密 PDF 在积木形态下要有路；密码只经 argv、不落盘、不入日志。⚠️ **v2.2 订正**：密码**不由引擎消费**（MinerU 4.1.7 无密码入口）⇒ ZCode 侧 poppler **前置解密**（[`ocr-local.md`](./ocr-local.md) §3.2.1） |
 
 ## 3. 积木模型
 
@@ -122,8 +123,8 @@ zcode 一侧只保证三件事：
 | **旗标必须在全局表注册** | `packages/cli/src/arguments.ts` 是 `strict: true` 的全局解析器，未注册的旗标在进分派表之前就报「未知参数」 |
 | **`--json` 是复用的既有旗标** | 已存在于全局表（`usage` / `plugins` 在用）⇒ **不得重复注册** |
 | **`--force` 也是复用的既有旗标** | 已注册在全局表且带短名 `-f`（`arguments.ts`）。⚠️ **它不是 `zcode ocr` 独占**：`zcode plugins` 里的 `--force` 是「非交互时跳过卸载确认」，语义不同 —— 同名不同义在仓库里已有先例（`path` / `output` / `tier`），**本 spec 明说这是有意的**，不做全局改名 |
-| ⚠️ **`--force` 的现状坑** | 今天 `zcode ocr parse --force` 能通过全局解析，但 `OcrFlags`（`packages/cli/src/ocr/arguments.ts`）**没有 `force` 字段**，`unexpectedFlags` 也不检查它 ⇒ **接受但完全忽略**。⇒ 实施时**必须**把它加进 `OcrFlags` 与各子命令的允许旗标集合，否则 `--force` 是个静默 no-op |
-| **输出目录是显式参数** | 产物落在 `--output` 指定的目录；不指定时用 `<源文件名去扩展名>.mineru/`（现有行为，见 `local-infra.md` §7.3） |
+| ⚠️ **`--force` 的现状坑** | ~~今天 `zcode ocr parse --force` 能通过全局解析，但 `OcrFlags` **没有 `force` 字段**…~~ ✅ **已修（v2.1，步 2/3）**：`OcrFlags` 已有 `force` / `pdfPassword`，`parse` 的允许集合含 `--force` / `--pdf-password`，语义见 §4.2 |
+| **输出目录是显式参数** | 产物落在 `--output` 指定的目录；不指定时用 `<源文件名>.mineru/`（⚠️ **含扩展名**，`扫描件.pdf` → `扫描件.pdf.mineru/`；现有行为，见 `local-infra.md` §7.3） |
 | **旗标只做「哪个积木收哪些」的组合校验** | 旗标语义由积木自己解释；全局表只负责「认不认识」 |
 
 ### 4.2 v1 各积木的参数
@@ -137,7 +138,9 @@ zcode 一侧只保证三件事：
 
 ⚠️ **`--force` 的语义**：忽略 sidecar 缓存，强制重算并覆盖 sidecar。**默认（不带）命中缓存直接返回**（D5）。⚠️ 这是**破坏性**的（覆盖已有产物）⇒ 破坏性动作在契约里显式命名，不做隐式行为。
 
-⚠️ **`--pdf-password`（D16）**：加密 PDF 的密码，**只经 argv 传递，不落盘、不入日志**（沿用 `pdf-document.port.ts` 约定）。⚠️ **今天 `zcode ocr parse` 会静默忽略它**（同上，`OcrFlags` 无此字段）⇒ 实施时必须把它加进 `OcrFlags`、允许集合与 PDF 端口调用链；[`ocr-local.md`](./ocr-local.md) §8 的错误 hint 指向 `--pdf-password`，实施后 hint 与行为才对得上。
+⚠️ **`--pdf-password`（D16）**：加密 PDF 的密码，**只经 argv 传递，不落盘、不入日志**（沿用 `pdf-document.port.ts` 约定）。⚠️ **v2.1 的说法不准确，v2.2 订正**：密码**不会**透传给 MinerU —— MinerU 4.1.7 **没有任何密码入口**（实测：`mineru-kit parse <加密.pdf>` 报 `Failed to load document (PDFium: Incorrect password error).`；`mineru-kit parse --help` 无 `--password`）。v2.1 里密码实际只到得了 poppler 的页数探测 ⇒ **flag 被接受但对解析没有作用**。
+✅ **v2.2 起**：端口在**调引擎前**用 poppler 探加密状态 —— **未给密码 ⇒ 直接报 `invalid_input`（hint 指向 `--pdf-password`），不空跑一次引擎**；**给了密码 ⇒ 先用 poppler `pdftocairo` 解出临时无密副本再交给引擎**（解密路线见 [`ocr-local.md`](./ocr-local.md) §3.2.1）。⇒ [`ocr-local.md`](./ocr-local.md) §8 的错误 hint 现在与行为对得上。
+⚠️ **全局旗标表里的作用域检查要放行 `zcode ocr`**：`--pdf-password` 注册在 `zcode` 全局旗标表（`arguments.ts`），而 `run.ts` 有一条「**只服务无头链路**（`-p` / `--target`）」的作用域检查 —— **`zcode ocr` 命令组是例外**（它自己消费这个 flag），否则会出现「收得到、用不了」（v2.1 的实测症状：`--pdf-password can only be used with --prompt or --target.`）。
 
 ⚠️ **不给积木加「批量」旗标**（`--input-dir` 之类）—— D1：批量是业务自己的编排（业务自己循环 / 并发）。zcode 只保证**单个文件**这条路径干净可靠。
 
@@ -147,6 +150,7 @@ zcode 一侧只保证三件事：
 | --- | --- | --- | --- |
 | `inspect` / `parse` | **数字版 PDF** | **poppler**（用户自装，配 `ocr.popplerPath`；⚠️ Windows 上默认不进 PATH） | `unavailable` + 装法 hint（§7） |
 | `inspect` / `parse` | **扫描件 / 图片** | MinerU + 对应档位权重 | 权重 ⇒ 自动备（D11）；引擎本身缺失 ⇒ `unavailable` + hint |
+| `parse` | **加密 PDF** | 同上 + poppler 的 **`pdftocairo`**（poppler 自带，非新依赖） | 没装 poppler ⇒ 加密 PDF 走不通（`unavailable`）；**未加密 PDF 不受影响**（不会调 `pdftocairo`）。解密路线见 [`ocr-local.md`](./ocr-local.md) §3.2.1 |
 
 ⚠️ **poppler 是第三类依赖**（引擎、Python、权重之外）⇒ 必须写进业务接入说明，否则业务第一次调 `inspect` 就撞墙。
 
@@ -263,7 +267,29 @@ zcode 一侧只保证三件事：
 | **阶段语义** | `provision` = 备资产（下载权重 / 语言包）；`analyze` = 识别 / 原生分析；`write` = 落产物与 sidecar |
 | **频率** | ≥ 1 次/秒，或每个阶段切换时必发；**结束前必须发最后一个事件** |
 
-⚠️ **当前实现不满足这条**：今天的 `zcode ocr parse` 失败时**只写 stdout**（`packages/cli/src/ocr/parse-command.ts` 无 stderr 分支），也没有任何进度输出。⇒ 实施时一并修（§11 步 2）。
+✅ **已实施（v2.1，步 2）**：进度走 `packages/cli/src/ocr/output.ts` 的 `createReporter` —— `--json` 时 stderr 每行一个 NDJSON 事件（`type: "progress"`），**错误不进 stderr**（只在 stdout 信封里 + 退出码）；无 `--json` 时 stderr 是人读文本。引擎自己的 stdout（`已解析 1 个输入。`）作为 `analyze` 阶段的进度转发，**不混进 stdout**。
+
+### 5.7 `ocr.parse` 的 `output` 形状（v2.1 实施定稿）
+
+```jsonc
+"output": {
+  "cached": false,                      // true = 命中 sidecar 缓存（**没重新识别**）
+  "sidecarPath": "/abs/扫描件.pdf.zcode-ocr.json",
+  "artifactsDir": "扫描件.pdf.mineru",  // ⚠️ **相对 sidecar 所在目录**
+  "engine": "mineru",
+  "tier": "basic",
+  "artifacts": {                        // ⚠️ 每个路径**相对 artifactsDir**
+    "markdownPath": "report.md",
+    "structuredContentPath": "structured_content.json",
+    "middleJsonPath": "middle_json.json",
+    "assetsDir": "images"
+  }
+}
+```
+
+⚠️ **`cached` 是业务判断「这次有没有再烧一次识别」的依据** —— `true` 表示直接复用了 sidecar，`false` 表示真的跑了一遍引擎。
+⚠️ **命中缓存时 `artifacts` 只有 sidecar 里记着的 markdown 路径**（sidecar 不记结构化产物的路径 —— 它们是引擎原生产物，调试用）。
+⚠️ **请求没给 `--tier` 而命中了缓存时**，`output.tier` 是 sidecar 里的实际档位，且 `metrics.warnings` 里有一条「本次用的是 sidecar 里的档位 X」⇒ 业务看得见实际用了哪一档。
 
 ## 6. 产物 sidecar 契约
 
@@ -289,7 +315,7 @@ zcode 一侧只保证三件事：
     "route": "mineru",             // 内部路线，业务不依赖
     "assets": {}                   // 用到的资产（语言包 / 权重组）
   },
-  "artifactsDir": "扫描件.mineru", // ⚠️ 产物根目录，**相对本 sidecar 所在目录**
+  "artifactsDir": "扫描件.pdf.mineru", // ⚠️ 产物根目录，**相对本 sidecar 所在目录**
   "pages": [
     {
       "pageIndex": 0,              // 0 基
@@ -326,12 +352,12 @@ zcode 一侧只保证三件事：
 
 | 路径字段 | 基准 |
 | --- | --- |
-| `artifactsDir` | **相对 sidecar 所在目录**（例：`扫描件.mineru`） |
+| `artifactsDir` | **相对 sidecar 所在目录**（例：`扫描件.pdf.mineru`） |
 | `elements[].imagePath` | **相对 `artifactsDir`** |
 | `text.markdownPath` | **相对 `artifactsDir`** |
 
 ⇒ 业务解析：`join(dirname(sidecarPath), artifactsDir, imagePath)`。
-⚠️ **sidecar 与产物目录是分开的** —— sidecar 在源文件旁（`office-runtime` 只读同目录的文件就能拿到），产物在 `<源文件名去扩展名>.mineru/`（或 `--output` 指定处）。
+⚠️ **sidecar 与产物目录是分开的** —— sidecar 在源文件旁（`office-runtime` 只读同目录的文件就能拿到），产物在 `<源文件名>.mineru/`（**含扩展名**；或 `--output` 指定处）。
 
 ### 6.3 旧变体字段 → 统一字段映射（D12）
 
@@ -477,7 +503,7 @@ sidecar 写入必须是「先写临时文件再 rename」（沿用 `ocr-local.md
 | spec | 关系 |
 | --- | --- |
 | [`capability-registry.md`](./capability-registry.md) | ⚠️ **§4.2 修订**：投影 A 不再是 `zcode cap run`，改为族命令组（D4）。⚠️ **§2 修订**：「能力键走新命令 `zcode cap run <key>`」作废，能力键是**注册表**概念、CLI 面发的是**积木 id**（D13 / §5.1）。§3 契约 / §7 退出码 / §8 信封**沿用**。§4.3 MCP 投影保留但降级；§4.4 内置工具投影（agent 自用）不受影响 |
-| [`ocr-local.md`](./ocr-local.md) | ⚠️ **§6.1 / §6.1.1 修订**：两个引擎变体 sidecar **作废**，统一到本 spec §6.2 的 **v3**（D12；对照表见 §6.3）。§6.5 修订：交付形态不再写死「子进程调 `zcode cap run ocr`」，改为「子进程调族积木」。§7 侧车 owner 表 / 执行链路图里的 `packages/capabilities` 路径按 D8 改写 |
+| [`ocr-local.md`](./ocr-local.md) | ⚠️ **§6.1 / §6.1.1 修订**：两个引擎变体 sidecar **作废**，统一到本 spec §6.2 的 **v3**（D12；对照表见 §6.3）。§6.5 修订：交付形态不再写死「子进程调 `zcode cap run ocr`」，改为「子进程调族积木」。§7 的 owner 表**标为历史记录**（tesseract 时代，多数行指向不存在的包），执行链路图按 D8 改写 |
 | [`local-infra.md`](./local-infra.md) | §7.3 的命令组表**沿用**（`zcode ocr` 三个子命令），本 spec 补 `inspect` 积木与 `--force`；§5.4 的档位状态语义不变；§5.5 的 sidecar 字段名要求（`pageWidthPt` / `pageHeightPt`）按 §6.3 改为页级 `widthPt` / `heightPt` |
 | [`capability-provisioning.md`](./capability-provisioning.md) | 路线决策规则**沿用**；本 spec 只定义它与积木契约的接口（§7） |
 | [`model-assets.md`](./model-assets.md) | `zcode asset` 族延期，占位地址未换（`local-infra.md` §7.3）；本 spec 不动它 |
@@ -542,16 +568,16 @@ sidecar 写入必须是「先写临时文件再 rename」（沿用 `ocr-local.md
 
 ## 11. 实施顺序
 
-| 步 | 内容 | 前置 |
-| --- | --- | --- |
-| 0 | **架构登记**：本次新增的**全部**目录逐个登记（见下方清单） | — |
-| 1 | **统一信封与错误码**：契约进 `packages/contracts/src/capability-blocks/`；实现进 `packages/core/src/capability/`；装配进 `packages/bootstrap/` | 0 |
-| 2 | **迁移 `zcode ocr` 的信封**到统一信封（§5.4 的逐字段迁移清单）+ **修 stderr 分流**（错误行 / 进度行，§5.6） | 1 |
-| 3 | **sidecar v3**：统一格式 + 分类规则（全枚举）+ 指纹 + 原子写 + 接力（`--force`） | 2 |
-| 4 | **`zcode ocr inspect` 积木**：页成分 + 元素位置（数字版 PDF 走 PDF 原生分析，扫描件落识别路线） | 3 |
-| 5 | **`zcode ocr parse` 补齐**产物（文字 / markdown 进同一份 sidecar；markdown 派生规则见 §6.5） | 4 |
-| 6 | **同步旧 spec 口径**：把 §9 表里列的 6 份 spec 的过期引用改掉（`zcode cap run` / `--input` / 旧 sidecar 字段名 / `zcode cap describe`） | 1 |
-| 7 | 契约文档化：`zcode ocr --help` 的族内动词表 + 业务接入说明（含 §4.3 的前置依赖） | 5 |
+| 步 | 内容 | 前置 | 状态 |
+| --- | --- | --- | --- |
+| 0 | **架构登记**：本次新增的**全部**目录逐个登记（见下方清单） | — | ✅ **已做**（两个模块，见下方清单） |
+| 1 | **统一信封与错误码**：契约进 `packages/contracts/src/capability-blocks/`；实现进 `packages/core/src/capability/`；装配进 `packages/bootstrap/` | 0 | ✅ **已做**（契约 + 实现；bootstrap 装配随 O4 一起做，见下） |
+| 2 | **迁移 `zcode ocr` 的信封**到统一信封（§5.4 的逐字段迁移清单）+ **修 stderr 分流**（错误行 / 进度行，§5.6） | 1 | ✅ **已做** |
+| 3 | **sidecar v3**：统一格式 + 分类规则（全枚举）+ 指纹 + 原子写 + 接力（`--force`） | 2 | ✅ **已做** |
+| 4 | **`zcode ocr inspect` 积木**：页成分 + 元素位置（数字版 PDF 走 PDF 原生分析，扫描件落识别路线） | 3 | ⏸ **未开工**（O1 未决） |
+| 5 | **`zcode ocr parse` 补齐**产物（文字 / markdown 进同一份 sidecar；markdown 派生规则见 §6.5） | 4 | ⏸ 未开工（依赖步 4） |
+| 6 | **同步旧 spec 口径**：把 §9 表里列的 6 份 spec 的过期引用改掉（`zcode cap run` / `--input` / 旧 sidecar 字段名 / `zcode cap describe`） | 1 | ⏸ 未做 |
+| 7 | 契约文档化：`zcode ocr --help` 的族内动词表 + 业务接入说明（含 §4.3 的前置依赖） | 5 | 🟡 **部分**：`zcode ocr --help` 已含旗标与产物说明；业务接入说明未写 |
 
 #### 步 0 的架构登记清单（D8）
 
@@ -559,10 +585,10 @@ sidecar 写入必须是「先写临时文件再 rename」（沿用 `ocr-local.md
 
 | 新增目录 | 建议模块 id | 备注 |
 | --- | --- | --- |
-| `packages/contracts/src/capability-blocks/` | `cli-capability-blocks` | ⚠️ **不叫 `capabilities`** —— 那个目录已存在（provider / model 能力描述的空壳），见 D8 与 §12 遗留项 |
-| `packages/core/src/capability/` | `cli-capability` | 实现 |
-| `packages/bootstrap/src/capability/` | `cli-capability-bootstrap` | 装配 |
-| `packages/cli/src/ocr/` 下的**新文件** | — | ⚠️ `packages/cli/src/ocr/` 已被现有文件覆盖 ⇒ **新增文件**才需登记；具体以 `architecture:check --changed` 的实际报违规为准 |
+| `packages/contracts/src/capability-blocks/` | `cli-capability-blocks` | ✅ **已登记**。⚠️ **不叫 `capabilities`** —— 那个目录已存在（provider / model 能力描述的空壳），见 D8 与 §12 遗留项 |
+| `packages/core/src/capability/` | `cli-capability` | ✅ **已登记**（实现） |
+| `packages/bootstrap/src/capability/` | `cli-capability-bootstrap` | ⏸ **本批不做** —— bootstrap 装配是**内置工具投影**的一部分（O4 未定），CLI 命令面有**自己的组合根**（`packages/cli/src/ocr/index.ts`），不经过 bootstrap ⇒ 登记一个空模块不成立 |
+| `packages/cli/src/ocr/` 下的**新文件** | — | ⚠️ `packages/cli/src/ocr/` 已被现有文件覆盖 ⇒ **新增文件**才需登记。✅ 本批新增的 `sidecar-store.ts` 已登记进 `architecture-policy.yaml` 的 `local-infra-unmanaged-files` 例外（`unmanaged-new-file` 规则） |
 | 各包的 `tests/` 新文件 | — | 测试目录**不在** `unmanaged-new-file` 规则范围内 |
 
 #### 步 4 的技术未知
@@ -576,7 +602,7 @@ sidecar 写入必须是「先写临时文件再 rename」（沿用 `ocr-local.md
 | **O1** | **数字版 PDF 的版面分析走哪条技术路线？** poppler（`pdftotext -bbox` 给词级 bbox、`pdfimages -list` 给图片对象）+ 自己算 bbox？还是有别的库？⚠️ **结果语义已定**（没识别出来 ⇒ 空白页），**待定的是实现路线** | **步 4** | 决定第 4 步的工作量与跨平台要求（Windows / macOS / Linux 都要有 poppler） |
 | **O2** | ~~图片位置对扫描件怎么给？~~ | — | ✅ **已定（2026-11-12）**：**扫描件就是一张图** —— ZCode 为扫描页合成覆盖整页的 image 元素（`bbox = [0,0,1,1]`，`origin: "rendered"`）；页成分按识别到的文字判 `text` / `text+image` / `image` |
 | **O3** | ~~sidecar 里的文字放哪？~~ | — | ✅ **已定（2026-11-12）**：**sidecar 放逐元素文字，不放文档级全文**；markdown 正文仍是独立产物（`text.markdownPath`） |
-| **O4** | **内置工具投影（`capability-registry.md` §4.4）要不要跟 CLI 积木同批做？** | 步 1 之后 | ⏸ **暂未定**（用户 2026-11-12）。不同批则 agent 侧能力晚于业务侧 |
+| **O4** | **内置工具投影（`capability-registry.md` §4.4）要不要跟 CLI 积木同批做？** | 步 1 之后 | ⏸ **暂未定**（用户 2026-11-12）。不同批则 agent 侧能力晚于业务侧。⚠️ **v2.1 连带项**：`packages/bootstrap/src/capability/`（D8 的装配位）**随 O4 一起做** —— CLI 命令面有自己的组合根，本批不经过 bootstrap |
 | **O5** | ~~进度可见性~~ | — | ✅ **已定（2026-11-12）**：**要进度**。通道与格式见 §5.6（D15）。⚠️ **遗留**：桌面端 / runtime 侧看不到 CLI 积木的进度（那是协议层的另一条链路，不在本 spec 范围） |
 | **O6** | **`zcode llm` 族的原子动词与参数**（单次问答？批量？结构化输出？） | 该族实施前 | ⏸ **暂不定**（用户 2026-11-12）。该族无归属 spec，实施前必须补 |
 | **O7** | **`contracts/src/capabilities/` 的撞名怎么处置？** 该目录现状是空壳（注释写「provider and model capability descriptions」，`export {}`），[`capability-registry.md`](./capability-registry.md) §11 已把它列为撞名点。**本 spec 的选择是绕开**：新契约放 `contracts/src/capability-blocks/`（D8），旧空壳**不动** | — | 🕐 遗留项：旧空壳的语义（provider / model 能力描述）vs 注册表能力键 vs 积木 id 是**三套**概念，需要一次单独清理；本 spec 只保证不加剧混淆 |
@@ -588,3 +614,5 @@ sidecar 写入必须是「先写临时文件再 rename」（沿用 `ocr-local.md
 | **v1** | **2026-11-12** | 首版：积木模型、族与原子动词、统一信封与退出码、sidecar v1（页成分分类 + 元素位置）、接力（D5）、交付形态。⚠️ 推翻 `capability-registry.md` §4.2 的 `zcode cap run` 统一执行面；修订 `ocr-local.md` §6.5 的交付形态 |
 | **v2** | **2026-11-12** | **审查后修订**（详见下方「v2 修订清单」）：统一 sidecar 升 **v3** 并加旧变体映射表（D12）；`key` 定为积木 id 闭集（D13）；运维面单列契约（D14）；加进度通道（D15）；`--pdf-password` 入参（D16）；分类规则改全枚举 + `status` 区分失败页；接力矩阵写死（消除「inspect → parse 必重算」的矛盾）；路径基准写死；架构登记清单补全；补测试落点；同步 6 份 spec 的过期引用 |
 | | | ⚠️ **v2 修订清单**：① 统一 sidecar 版本 v1 → **v3**（v1/v2 是两个历史变体，已废止），补 §6.3 字段映射表；② `key` 从「未定义的取值」改为**积木 id 闭集** + 与注册表能力键的关系；③ 运维面（`doctor` / `models download`）单列契约，解决「退出码恒 0」与「unavailable ⇒ 1」的冲突；④ 分类规则补全为 8 行全枚举，页对象加 `status` 区分「失败页」与「空白页」；⑤ 缓存命中判据第 3、4 条写死（档位判据 + 积木所需产物判据）；⑥ 加**接力矩阵**，明确「inspect → parse **不重复调用引擎**」；⑦ sidecar 里的路径基准写死（相对 `artifactsDir`）；⑧ 加 §5.6 进度通道；⑨ 加 §4.3 前置依赖（poppler）；⑩ §11 步 0 补全架构登记清单；⑪ 加 §10.4 测试入口与落点；⑫ 同步旧 spec 引用（§9 表 + 步 6） |
+| **v2.1** | **2026-11-12** | **实施步 0–3 后的回写**：① 状态行改为「步 0–3 已实施，步 4 待 O1」；② §5.7 补 `ocr.parse` 的 `output` 形状定稿（`cached` / `sidecarPath` / `artifactsDir` / `artifacts`）；③ §4.1 / §6.2 的默认产物目录名订正为 `<源文件名>.mineru/`（**含扩展名**，与 `local-infra.md` §7.3 一致；原写的「去扩展名」是笔误）；④ §4.1 / §4.2 标注 `--force` / `--pdf-password` 已实施；⑤ §5.6 标注进度通道已实施；⑥ §11 步 0 清单订正为**实际登记的两个模块** + bootstrap 装配随 O4；⑦ §11 表加「状态」列。⚠️ **验收覆盖**：§10.1 全表 ⇒ `@zcode/cli` 的 `tests/ocr-command.test.ts`；§10.2 的分类 / 映射表 / 命中判据 / 接力（**parse → parse**）/ 指纹失效 / `--force` ⇒ `@zcode/core` 的 `tests/capability-ocr-sidecar.test.ts`；MinerU 产物 → 元素模型的提取 ⇒ `@zcode/adapters` 的 `tests/local-infra/document-model.test.ts`。**`inspect` 相关的接力行待步 4** |
+| **v2.2** | **2026-11-12** | **加密 PDF 路线落地 + v2.1 失实表述订正**：① ⚠️ **v2.1 说「`--pdf-password` 已实施、hint 与行为对得上」是错的** —— 实测 MinerU 4.1.7 **没有任何密码入口**（`mineru-kit parse <加密.pdf>` 报 `Failed to load document (PDFium: Incorrect password error).`；`mineru-kit parse --help` 无 `--password`；`mineru.parser.parse()` 与 `docvortex.document.pdf.PDFDocument.__init__` 无密码参数）⇒ 密码原先只到得了 poppler 的页数探测，**flag 被接受但对解析没有作用**；② 新路线：**端口在调引擎前探加密状态** —— 未给密码 ⇒ 直接报 `password_protected`（对外 `invalid_input`，hint 指向 `--pdf-password`），**不空跑一次引擎**；给了密码 ⇒ 先用 poppler `pdftocairo -pdf -upw/-opw` 解出**临时无密副本**再交给引擎，解析完即删（原文件不动、指纹仍取原文件）；③ 端口没有 poppler 时走兜底：引擎 stderr 里的 `Incorrect password` 同样归一成 `password_protected`；④ 契约层加 `LocalInfraErrorCode.password_protected` 与 `PdfDocumentPort.decryptToFile`；⑤ §4.3 前置依赖补「加密 PDF 需要 poppler 的 `pdftocairo`」；⑥ ⚠️ **修一个实测暴露的接线 bug**：`--pdf-password` 注册在**全局**旗标表，`run.ts` 的「只服务无头链路」作用域检查会把 `zcode ocr` 一起拦掉（症状：`--pdf-password can only be used with --prompt or --target.`）⇒ `zcode ocr` 命令组豁免该检查（回归见 `packages/cli/tests/pdf-password.test.ts`）。⚠️ **实测留痕**：同一份 PDF 的原文与解密副本分别过 MinerU，**元素模型逐项一致**（块类型 / bbox / `image_source` 全同）⇒ cairo 重编码对 OCR 产物无可见影响（实测结论，非保证）。路线细节见 [`ocr-local.md`](./ocr-local.md) §3.2.1 |

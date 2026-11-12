@@ -115,3 +115,33 @@ test("--pdf-password rejects an empty value", async () => {
   assert.match(h.output().stderr, /--pdf-password requires non-empty text/);
   assert.deepEqual(h.calls, []);
 });
+
+test("`zcode ocr` is exempt from the headless --pdf-password scope", async () => {
+  // ⚠️ 回归：`zcode ocr parse` **自己**消费 `--pdf-password`（spec：
+  // capability-cli-blocks.md D16 / ocr-local.md §3.2.1）。全局作用域检查只管
+  // **无头链路**（-p/--target），不能把 ocr 命令组一起拦掉 ——
+  // 否则 flag 收得到却用不了（实测过一次：报「--pdf-password can only be used
+  // with --prompt or --target.」）。
+  const h = harness([
+    "ocr",
+    "parse",
+    "--path",
+    "/tmp/zcode-missing-pdf.pdf",
+    "--pdf-password",
+    "pw-12345",
+    "--json",
+  ]);
+  const exitCode = await run(h.ctx, h.deps);
+  const { stdout, stderr } = h.output();
+
+  assert.doesNotMatch(stderr, /--pdf-password.*--prompt/u);
+  // ⚠️ 走到 parse 分支了（文件不存在 ⇒ not_found 信封，退出码 1）。
+  assert.equal(exitCode, 1);
+  const envelope = JSON.parse(stdout) as { key: string; ok: boolean; error?: { code?: string } };
+  assert.equal(envelope.key, "ocr.parse");
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.error?.code, "not_found");
+  // ⚠️ 密码**绝不出现在输出里**。
+  assert.doesNotMatch(stdout, /pw-12345/u);
+  assert.doesNotMatch(stderr, /pw-12345/u);
+});

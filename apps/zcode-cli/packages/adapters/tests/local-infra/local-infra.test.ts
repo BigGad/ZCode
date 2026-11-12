@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { PdfDocumentPortError } from "@zcode/contracts";
 import type {
   ExecutionPort,
   ExecutionRequest,
@@ -81,10 +82,36 @@ function engineHandler(options: EngineOptions = {}) {
   };
 }
 
-function fakePdf(pageCount: number | undefined = 12): PdfDocumentPort {
+/**
+ * 假 PDF 端口（poppler 那一侧）。
+ *
+ * ⚠️ **加密语义要像真的**：poppler 的 `pdfinfo` 对加密 PDF 是「退出码非 0 + stderr 说密码错」，
+ * 端口层把它归成 `password_protected` 抛出 —— 端口实现见 `src/pdf/index.ts`。
+ */
+interface FakePdfOptions {
+  readonly pageCount?: number | undefined;
+  /** 不带密码探时报密码错 ⇒ 这份 PDF 是加密的。 */
+  readonly encrypted?: boolean;
+  /** 带密码探时也报密码错 ⇒ 密码不对。 */
+  readonly rejectPassword?: boolean;
+}
+
+function fakePdf(options: FakePdfOptions = {}): PdfDocumentPort {
+  const pageCount = options.pageCount ?? 12;
   return {
-    async getPageCount() {
+    async getPageCount(request: { password?: string }) {
+      if (options.encrypted === true && request.password === undefined) {
+        throw new PdfDocumentPortError("password_protected", "PDF is password-protected.");
+      }
+      if (options.rejectPassword === true && request.password !== undefined) {
+        throw new PdfDocumentPortError("password_protected", "PDF password was rejected.");
+      }
       return pageCount;
+    },
+    async decryptToFile(request: { outputPath: string }) {
+      // ⚠️ 真的落一份文件：后面要断言「用完即删」。
+      await writeFile(request.outputPath, "%PDF-1.7\n% decrypted\n");
+      return { path: request.outputPath, bytes: 22 };
     },
   } as unknown as PdfDocumentPort;
 }
@@ -97,7 +124,10 @@ interface Harness {
 }
 
 async function createHarness(
-  options: EngineOptions & { readonly pages?: number | undefined } = {},
+  options: EngineOptions & {
+    readonly pages?: number | undefined;
+    readonly pdf?: FakePdfOptions;
+  } = {},
 ): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), "zcode-local-infra-"));
   roots.push(root);
@@ -107,7 +137,7 @@ async function createHarness(
     execution,
     fileSystem: createNodeFileSystemAdapter(),
     config: { mineruPath: kitPath },
-    pdf: fakePdf(options.pages),
+    pdf: fakePdf({ pageCount: options.pages, ...options.pdf }),
   });
   return { port, execution, kitPath, root };
 }
@@ -530,5 +560,85 @@ describe("本地基础设施端口 —— models download", () => {
       (call) => argvOf(call)[0] === "models" && argvOf(call)[1] === "download",
     );
     expect(downloadCall?.timeoutMs).toBe(MODELS_DOWNLOAD_TIMEOUT_MS);
+  });
+});
+
+/**
+ * 加密 PDF 的解密路线（spec：docs/design/v2/ocr-local.md §3.2.1）。
+ *
+ * ⚠️ 根因（MinerU 4.1.7 实测）：引擎**没有任何密码入口** —— 加密 PDF 直接喂进去
+ * 必报 `Failed to load document (PDFium: Incorrect password error).`
+ * ⇒ 密码由 ZCode 侧用 poppler 前置解密消费。
+ */
+describe("本地基础设施端口 —— 加密 PDF", () => {
+  it("加密 PDF 没给密码：直接报 password_protected，不空跑一次引擎", async () => {
+    const harness = await createHarness({ pdf: { encrypted: true } });
+    const input = join(harness.root, "input.pdf");
+    await writeFile(input, "%PDF-1.7");
+
+    const result = await harness.port.parse({ path: input });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("password_protected");
+    expect(result.error?.hint).toContain("--pdf-password");
+    // ⚠️ 关键断言：**没有 spawn 过引擎的 parse** —— 加密 PDF 不该白跑一次几十秒的解析。
+    expect(
+      harness.execution.calls.filter((call) => argvOf(call).includes("--format")),
+    ).toHaveLength(0);
+  });
+
+  it("加密 PDF 密码被拒：报 password_protected，不调引擎", async () => {
+    const harness = await createHarness({ pdf: { encrypted: true, rejectPassword: true } });
+    const input = join(harness.root, "input.pdf");
+    await writeFile(input, "%PDF-1.7");
+
+    const result = await harness.port.parse({ path: input, password: "wrong" });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("password_protected");
+    expect(result.error?.details?.reason).toBe("password_rejected");
+    expect(
+      harness.execution.calls.filter((call) => argvOf(call).includes("--format")),
+    ).toHaveLength(0);
+  });
+
+  it("加密 PDF 给了密码：引擎拿到的是解密副本，原文件不进 argv，副本用完即删", async () => {
+    const harness = await createHarness({
+      pdf: { encrypted: true },
+      parseZip: () => buildZip(mineruArtifacts("basic")),
+    });
+    const input = join(harness.root, "input.pdf");
+    await writeFile(input, "%PDF-1.7");
+
+    const result = await harness.port.parse({ path: input, password: "pw" });
+
+    expect(result.ok).toBe(true);
+    const parseCall = harness.execution.calls.find((call) => argvOf(call).includes("--format"))!;
+    const args = argvOf(parseCall);
+    const engineInput = args[1]!;
+    // ⚠️ 引擎拿到的**不是原文件**（原文件是加密的，引擎打不开）。
+    expect(engineInput).not.toBe(input);
+    expect(engineInput.endsWith(".pdf")).toBe(true);
+    // ⚠️ 密码**绝不出现在引擎的 argv 里** —— 引擎没有密码入口，密码只经 poppler 的 argv 走。
+    expect(args).not.toContain("pw");
+    // ⚠️ 解密副本是受保护文档的明文 ⇒ 用完即删。
+    await expect(stat(engineInput)).rejects.toThrow();
+  });
+
+  it("引擎 stderr 里的 Incorrect password 归一成 password_protected（没接 poppler 时的兜底）", async () => {
+    const harness = await createHarness({
+      parseExit: {
+        code: 1,
+        stderr: "Failed to load document (PDFium: Incorrect password error).",
+      },
+    });
+    const input = join(harness.root, "input.pdf");
+    await writeFile(input, "%PDF-1.7");
+
+    const result = await harness.port.parse({ path: input });
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.code).toBe("password_protected");
+    expect(result.error?.hint).toContain("--pdf-password");
   });
 });

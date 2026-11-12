@@ -1,12 +1,14 @@
 import type { LocalInfraDoctorReport, LocalInfraPort } from "@zcode/contracts";
-import { OCR_EXIT_OK, type OcrContext, writeJson } from "./output.js";
+import { buildSuccessEnvelope } from "@zcode/core";
+import { OCR_EXIT_OK, type OcrContext, writeEnvelope } from "./output.js";
 
 /**
  * `zcode ocr doctor` —— 本地解析引擎体检。
  *
  * ⚠️ **只读**：不下载权重、不装依赖、不写任何状态。
- * ⚠️ **退出码恒为 0**（除非参数非法）：体检报告本身就是结果，"不可用"是**有效报告**
- * 而不是命令失败。
+ * ⚠️ **恒为成功信封、退出码恒为 0**（spec §5.5 的「运维面」）：
+ * 体检报告本身就是结果，"不可用"是**有效报告**而不是命令失败 ——
+ * 业务不能靠退出码判断环境好坏，得读 `output.report`。
  * ⚠️ 标题必须写"本地解析引擎体检"——`zcode doctor` 是另一回事（运行时与打包假设检查）。
  */
 export async function runDoctorCommand(
@@ -15,11 +17,16 @@ export async function runDoctorCommand(
   options: { readonly json: boolean },
 ): Promise<number> {
   const report = await port.doctor();
+  const envelope = buildSuccessEnvelope(
+    "ocr.doctor",
+    { report },
+    { durationMs: report.durationMs },
+  );
   if (options.json) {
-    writeJson(ctx, report);
-    return OCR_EXIT_OK;
+    writeEnvelope(ctx, envelope);
+  } else {
+    writeDoctorReport(ctx, report);
   }
-  writeDoctorReport(ctx, report);
   return OCR_EXIT_OK;
 }
 

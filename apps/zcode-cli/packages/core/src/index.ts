@@ -198,6 +198,30 @@ export type {
   RuntimeFactory,
 } from "./runtime.js";
 
+// 能力积木层（业务侧 CLI 接入面；spec：docs/design/v2/capability-cli-blocks.md）
+export {
+  buildFailureEnvelope,
+  buildOcrSidecar,
+  buildSuccessEnvelope,
+  classifyOcrElementType,
+  computeOcrPageComposition,
+  deriveOcrMarkdown,
+  evaluateOcrSidecarCache,
+  exitCodeForCapabilityError,
+  normalizeLocalInfraError,
+  ocrSidecarLocationFor,
+  OCR_ELEMENT_TYPE_CATEGORIES,
+  OCR_SIDECAR_SUFFIX,
+} from "./capability/index.js";
+export type {
+  OcrPageCompositionResult,
+  OcrSidecarBuildInput,
+  OcrSidecarCacheCriteria,
+  OcrSidecarCacheDecision,
+  OcrSidecarLocation,
+  OcrSidecarResolver,
+} from "./capability/index.js";
+
 // Output helpers
 export { color, formatJson, supportsColor } from "./output.js";
 

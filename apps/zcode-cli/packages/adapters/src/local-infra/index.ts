@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir, totalmem } from "node:os";
-import { extname, join, resolve } from "node:path";
-import { createTraceId, MINERU_TIERS } from "@zcode/contracts";
+import { basename, extname, join, resolve } from "node:path";
+import { createTraceId, MINERU_TIERS, PdfDocumentPortError } from "@zcode/contracts";
 import type {
   EngineAvailability,
   LocalInfraDoctorReport,
@@ -16,13 +16,16 @@ import type {
   MineruTier,
 } from "@zcode/contracts";
 import { extractZipArchive } from "../fs/zip-extract.js";
-import { prepareOutputDir, scanArtifacts } from "./artifact-store.js";
+import { prepareOutputDir, readDocumentModelFromFile, scanArtifacts } from "./artifact-store.js";
 import {
   HARDWARE_DETECT_TIMEOUT_MS,
+  INCORRECT_PASSWORD_PATTERN,
   MINERU_INSTALL_HINT,
   MODELS_DOWNLOAD_TIMEOUT_MS,
   MODELS_SHOW_TIMEOUT_MS,
   PARSE_COLD_START_BUDGET_MS,
+  PDF_PASSWORD_REJECTED_HINT,
+  PDF_PASSWORD_REQUIRED_HINT,
   TIER_SECONDS_PER_PAGE,
   VERSION_CHECK_TIMEOUT_MS,
 } from "./constants.js";
@@ -214,7 +217,37 @@ class LocalInfraAdapter implements LocalInfraPort {
     warnings.push(...decision.warnings);
     const tier = decision.tier;
 
-    const pageCount = await this.resolvePageCount(inputPath, isPdf);
+    // ── 加密 PDF：先探状态，再决定要不要解密（spec：ocr-local.md §3.2.1）──
+    // ⚠️ **必须在调引擎之前**：引擎（MinerU 4.1.7）没有密码入口，加密 PDF 直接喂进去
+    // 只会得到一句 `PDFium: Incorrect password error` —— 那是「引擎崩了」的表象，
+    // 不是「密码不对」的真相。⇒ 端口先把这件事说清楚，别让用户白等一次解析。
+    const pdfState = await this.inspectPdf(inputPath, isPdf, request.password);
+    if (pdfState.passwordRejected === true) {
+      return this.failure(
+        startedAt,
+        {
+          code: "password_protected",
+          message: "PDF 密码被拒绝",
+          hint: PDF_PASSWORD_REJECTED_HINT,
+          details: { engineCode: "password_protected", reason: "password_rejected" },
+        },
+        warnings,
+      );
+    }
+    if (pdfState.encrypted === true && request.password === undefined) {
+      return this.failure(
+        startedAt,
+        {
+          code: "password_protected",
+          message: "PDF 已加密，需要密码才能解析",
+          hint: PDF_PASSWORD_REQUIRED_HINT,
+          details: { engineCode: "password_protected", reason: "password_required" },
+        },
+        warnings,
+      );
+    }
+
+    const pageCount = pdfState.pageCount;
     if (pageCount === undefined) {
       warnings.push("未能取到页数，超时预算按 1 页计费");
     }
@@ -227,10 +260,23 @@ class LocalInfraAdapter implements LocalInfraPort {
     // 把产物写在里面 ⇒ 引擎退出码 0 但 ZCode 找不到 zip ⇒ 误报 artifact_missing。
     const archivePath = join(tmpdir(), `zcode-mineru-${randomUUID()}.zip`);
 
+    // ⚠️ **解密副本**：加密 PDF 时引擎拿到的是副本，不是原文件（原件不动、指纹仍取原件）。
+    let engineInputPath = inputPath;
+    let decryptDirectory: string | undefined;
+    if (pdfState.encrypted === true && request.password !== undefined) {
+      const decrypted = await this.decryptPdfCopy(inputPath, request.password);
+      if (!decrypted.ok) {
+        return this.failure(startedAt, decrypted.error, warnings);
+      }
+      engineInputPath = decrypted.path;
+      decryptDirectory = decrypted.directory;
+      warnings.push("已解密加密 PDF：引擎解析的是临时无密副本（用完即删）");
+    }
+
     // ⚠️ **`parse` 是子命令，必须放在最前面** —— `mineru-kit parse <inputs>...`
     // （实测 `mineru-kit parse --help`）。漏掉它时 MinerU 会把输入路径当成
     // 未知子命令，报 `No such command '/path/to.pdf'`（退出码 2）。
-    const args = ["parse", inputPath];
+    const args = ["parse", engineInputPath];
     // ⚠️ `--pages` 只对 PDF 有效，图片输入带上会被引擎拒。
     if (isPdf) args.push("--pages", "all");
     if (tier !== undefined) args.push("--tier", tier);
@@ -262,6 +308,24 @@ class LocalInfraAdapter implements LocalInfraPort {
       }
 
       if (!run.ok) {
+        // ⚠️ **引擎认不出「密码不对」** —— MinerU 没有密码入口，加密 PDF 直接喂进去
+        // 只会在 PDFium 层留下 `Incorrect password error`（spec：ocr-local.md §3.2.1）。
+        // ⇒ 这里把它认成 `password_protected`，别让用户以为引擎崩了。
+        if (INCORRECT_PASSWORD_PATTERN.test(run.stderr)) {
+          return this.failure(
+            startedAt,
+            {
+              code: "password_protected",
+              message: "PDF 已加密，引擎打不开它",
+              hint:
+                request.password === undefined
+                  ? PDF_PASSWORD_REQUIRED_HINT
+                  : "已给密码但引擎仍报密码错：可能是没装 poppler（解密走不通），请确认 PDF 密码是否正确",
+              details: { engineCode: "password_protected", reason: "password_required" },
+            },
+            warnings,
+          );
+        }
         return this.failure(
           startedAt,
           {
@@ -314,6 +378,17 @@ class LocalInfraAdapter implements LocalInfraPort {
         );
       }
 
+      // ⚠️ 元素级模型**默认不产出**（体积随全文增长）；只有要写 sidecar 的调用方才要。
+      const documentModel =
+        request.documentModel === true && scan.structuredContentPath !== undefined
+          ? await readDocumentModelFromFile(scan.structuredContentPath, {
+              artifactsRoot: outputDir,
+            })
+          : undefined;
+      if (request.documentModel === true && documentModel === undefined) {
+        warnings.push("未能从结构化产物中提取元素级模型，sidecar 将缺少逐元素信息");
+      }
+
       return {
         ok: true,
         engine: "mineru",
@@ -328,6 +403,7 @@ class LocalInfraAdapter implements LocalInfraPort {
             : {}),
           ...(scan.middleJsonPath !== undefined ? { middleJsonPath: scan.middleJsonPath } : {}),
           ...(scan.assetsDir !== undefined ? { assetsDir: scan.assetsDir } : {}),
+          ...(documentModel !== undefined ? { documentModel } : {}),
         },
         warnings,
         durationMs: Date.now() - startedAt,
@@ -348,6 +424,10 @@ class LocalInfraAdapter implements LocalInfraPort {
       );
     } finally {
       await this.removeTempArchive(archivePath);
+      // ⚠️ **解密副本必须删**：它是受保护的文档的明文副本，不能留在用户目录里。
+      if (decryptDirectory !== undefined) {
+        await removeTempDirectory(decryptDirectory);
+      }
     }
   }
 
@@ -473,19 +553,136 @@ class LocalInfraAdapter implements LocalInfraPort {
     return PARSE_COLD_START_BUDGET_MS + pageCount * perPage;
   }
 
-  /** 页数取不到（图片 / 无 poppler / PDF 读失败）时按 1 页计。 */
-  private async resolvePageCount(path: string, isPdf: boolean): Promise<number | undefined> {
-    if (!isPdf) return undefined;
+  /**
+   * 探 PDF 的加密状态与页数（spec：ocr-local.md §3.2.1）。
+   *
+   * ⚠️ **为什么要端口自己探**：引擎（MinerU 4.1.7）没有密码入口，加密 PDF 直接喂进去
+   * 只会得到一句 `PDFium: Incorrect password error` —— 那是「引擎崩了」的表象，
+   * 不是「密码不对」的真相。⇒ 端口在调引擎前用 poppler 把这件事说清楚。
+   * ⚠️ **探不动不等于加密**：没装 poppler / PDF 读失败时返回「未知」，
+   * 此时交给引擎兜底（引擎 stderr 里的 `Incorrect password` 同样归一成
+   * `password_protected`）。
+   */
+  private async inspectPdf(
+    path: string,
+    isPdf: boolean,
+    password: string | undefined,
+  ): Promise<PdfInspection> {
     const pdf = this.deps.pdf;
-    if (pdf === undefined) return undefined;
+    if (!isPdf || pdf === undefined) return {};
+    const trace = { traceId: createTraceId() };
+
+    if (password !== undefined) {
+      let accepted: number | undefined;
+      try {
+        // ⚠️ 密码只经 argv 传给 poppler 子进程，不落盘、不入日志（port 约定）。
+        accepted = await pdf.getPageCount({ filePath: path, password, trace });
+      } catch (error) {
+        if (isPasswordProtectedError(error)) return { passwordRejected: true };
+        return {};
+      }
+      if (accepted === undefined) return {};
+      // 带密码能打开 ⇒ 密码对。**这份 PDF 到底加没加密？** 再不带密码探一次 ——
+      // 带对密码的探测对「加密 / 未加密」两种文件都是成功，分不出来。
+      try {
+        await pdf.getPageCount({ filePath: path, trace });
+        return { encrypted: false, pageCount: accepted };
+      } catch (error) {
+        if (isPasswordProtectedError(error)) return { encrypted: true, pageCount: accepted };
+        return { pageCount: accepted };
+      }
+    }
+
     try {
-      const count = await pdf.getPageCount({
+      const count = await pdf.getPageCount({ filePath: path, trace });
+      return { encrypted: false, pageCount: count };
+    } catch (error) {
+      if (isPasswordProtectedError(error)) return { encrypted: true };
+      return {};
+    }
+  }
+
+  /**
+   * 解密副本（spec：ocr-local.md §3.2.1）。
+   *
+   * ⚠️ 副本落在**系统临时目录**（不在用户目录里留明文），由调用方在解析结束后删。
+   * ⚠️ 副本名**必须以 `.pdf` 结尾** —— `pdftocairo -pdf` 在输出名没有扩展名时会
+   * 自己补 `.pdf`，副本就落到别的路径上去了。
+   */
+  private async decryptPdfCopy(
+    path: string,
+    password: string,
+  ): Promise<
+    { ok: true; path: string; directory: string } | { ok: false; error: LocalInfraError }
+  > {
+    const pdf = this.deps.pdf;
+    if (pdf === undefined) {
+      return {
+        ok: false,
+        error: {
+          code: "engine_unavailable",
+          message: "未接入 PDF 端口，无法解密加密 PDF",
+          hint: "安装 poppler-utils 后重试",
+          details: { engineCode: "engine_unavailable" },
+        },
+      };
+    }
+    let directory: string;
+    try {
+      directory = await mkdtemp(join(tmpdir(), "zcode-ocr-decrypt-"));
+    } catch (error) {
+      return {
+        ok: false,
+        error: {
+          code: "process_failed",
+          message: "无法创建解密临时目录",
+          hint: error instanceof Error ? error.message : String(error),
+          details: { engineCode: "process_failed" },
+        },
+      };
+    }
+    const outputPath = join(directory, `${basename(path, extname(path)) || "document"}.pdf`);
+    try {
+      await pdf.decryptToFile({
         filePath: path,
+        password,
+        outputPath,
         trace: { traceId: createTraceId() },
       });
-      return count !== undefined && count > 0 ? count : undefined;
-    } catch {
-      return undefined;
+      return { ok: true, path: outputPath, directory };
+    } catch (error) {
+      await removeTempDirectory(directory);
+      if (isPasswordProtectedError(error)) {
+        return {
+          ok: false,
+          error: {
+            code: "password_protected",
+            message: "PDF 密码被拒绝",
+            hint: PDF_PASSWORD_REJECTED_HINT,
+            details: { engineCode: "password_protected", reason: "password_rejected" },
+          },
+        };
+      }
+      if (error instanceof PdfDocumentPortError && error.code === "unavailable") {
+        return {
+          ok: false,
+          error: {
+            code: "engine_unavailable",
+            message: "解密加密 PDF 需要的 poppler 不可用",
+            hint: error.message,
+            details: { engineCode: "engine_unavailable" },
+          },
+        };
+      }
+      return {
+        ok: false,
+        error: {
+          code: "process_failed",
+          message: "PDF 解密失败",
+          hint: error instanceof Error ? error.message : String(error),
+          details: { engineCode: "process_failed" },
+        },
+      };
     }
   }
 
@@ -547,6 +744,35 @@ async function statFile(path: string): Promise<Awaited<ReturnType<typeof stat>> 
     return info.isFile() ? info : undefined;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * PDF 的加密状态探查结果（spec：ocr-local.md §3.2.1）。
+ *
+ * ⚠️ 三个字段都**可能缺席** —— 探不动（没装 poppler / PDF 读失败）时是「未知」，
+ * 不是「未加密」。未知 ⇒ 照常调引擎，由引擎 stderr 兜底判定。
+ */
+interface PdfInspection {
+  /** 确认加密。 */
+  readonly encrypted?: boolean;
+  /** 密码被拒（探的时候带了密码，poppler 说密码不对）。 */
+  readonly passwordRejected?: boolean;
+  /** 页数（超时预算用）。 */
+  readonly pageCount?: number;
+}
+
+/** PDF 端口报的「密码不对」。 */
+function isPasswordProtectedError(error: unknown): boolean {
+  return error instanceof PdfDocumentPortError && error.code === "password_protected";
+}
+
+/** 删临时目录（解密副本所在处）；失败不影响本次解析结果。 */
+async function removeTempDirectory(directory: string): Promise<void> {
+  try {
+    await rm(directory, { recursive: true, force: true });
+  } catch {
+    // 临时目录清理失败不影响解析结果（它在系统临时目录里，由系统兜底回收）。
   }
 }
 

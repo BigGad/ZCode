@@ -15,6 +15,10 @@ export interface OcrFlags {
   readonly output?: string;
   readonly tier?: string;
   readonly source?: string;
+  /** `--force`：忽略 sidecar 缓存，强制重算（spec §6.5 的接力断点）。 */
+  readonly force?: boolean;
+  /** `--pdf-password`：加密 PDF 的密码（**只经 argv 传递，不落盘、不入日志**）。 */
+  readonly pdfPassword?: string;
 }
 
 /** 组合校验的输入。 */
@@ -42,6 +46,10 @@ export type OcrCommand =
        * 验收 A4 要求的错误形状（`error.code = "invalid_input"` + `details.engineCode`）出不来。
        */
       readonly tier?: string;
+      /** `--force`：忽略 sidecar 缓存，强制重算。 */
+      readonly force?: boolean;
+      /** `--pdf-password`：加密 PDF 的密码（argv only）。 */
+      readonly pdfPassword?: string;
     }
   | {
       readonly kind: "models-download";
@@ -78,7 +86,7 @@ export function parseOcrArgs(input: OcrCommandInput): OcrCommand {
     if (extra !== undefined) {
       return { kind: "error", message: `parse 只接受 --path 指定输入，不接受位置参数：${extra}` };
     }
-    const unexpected = unexpectedFlags(flags, ["path", "output", "tier"]);
+    const unexpected = unexpectedFlags(flags, ["path", "output", "tier", "force", "pdf-password"]);
     if (unexpected.length > 0) {
       return { kind: "error", message: `parse 不接受旗标：${unexpected.join("、")}` };
     }
@@ -92,6 +100,8 @@ export function parseOcrArgs(input: OcrCommandInput): OcrCommand {
       path,
       ...(flags.output !== undefined ? { output: flags.output } : {}),
       ...(flags.tier !== undefined ? { tier: flags.tier } : {}),
+      ...(flags.force === true ? { force: true } : {}),
+      ...(flags.pdfPassword !== undefined ? { pdfPassword: flags.pdfPassword } : {}),
     };
   }
 
@@ -131,11 +141,13 @@ export function parseOcrArgs(input: OcrCommandInput): OcrCommand {
 
 /** 列出不在允许集合里的旗标（按固定顺序输出，便于测试断言）。 */
 function unexpectedFlags(flags: OcrFlags, allowed: readonly string[]): string[] {
-  const present: Array<[string, string | undefined]> = [
+  const present: Array<[string, string | boolean | undefined]> = [
     ["path", flags.path],
     ["output", flags.output],
     ["tier", flags.tier],
     ["source", flags.source],
+    ["force", flags.force],
+    ["pdf-password", flags.pdfPassword],
   ];
   return present
     .filter(([name, value]) => value !== undefined && !allowed.includes(name))

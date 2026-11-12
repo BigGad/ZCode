@@ -1,14 +1,17 @@
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   PdfDocumentPortError,
   READ_PDF_AVAILABILITY_TIMEOUT_MS,
+  READ_PDF_DECRYPT_TIMEOUT_MS,
   READ_PDF_INFO_TIMEOUT_MS,
   READ_PDF_MAX_PAGES_PER_REQUEST,
   READ_PDF_RENDER_TIMEOUT_MS,
   type ExecutionPort,
   type ExecutionResult,
+  type PdfDocumentDecryptRequest,
+  type PdfDocumentDecryptedFile,
   type PdfDocumentPageCountRequest,
   type PdfDocumentPort,
   type PdfDocumentRenderPagesRequest,
@@ -23,6 +26,18 @@ export interface PopplerPdfDocumentAdapterOptions {
 const BROKEN_PDF_STRUCTURE_PATTERN =
   /Syntax Error(?: \(\d+\))?: Couldn't (?:find trailer dictionary|read xref table)/iu;
 
+/**
+ * Poppler 判定「密码不对」的 stderr 片段。
+ * ⚠️ 实测 `pdftocairo -pdf -upw <错密码>` 的 stderr 是：
+ * `Command Line Error: Incorrect password` + `Error opening PDF file.`（退出码 1）。
+ */
+const INCORRECT_PASSWORD_PATTERN = /incorrect password/iu;
+
+/** poppler 的 PDF→PDF 重编码（`pdftocairo -pdf`）。 */
+const PDFCAIRO_BINARY = "pdftocairo";
+/** poppler 的渲染（`pdftoppm`）。 */
+const PDFTOPPM_BINARY = "pdftoppm";
+
 export function createPopplerPdfDocumentAdapter(
   options: PopplerPdfDocumentAdapterOptions,
 ): PdfDocumentPort {
@@ -30,7 +45,8 @@ export function createPopplerPdfDocumentAdapter(
 }
 
 class PopplerPdfDocumentAdapter implements PdfDocumentPort {
-  private availabilityConfirmed = false;
+  /** 已确认装好的 poppler 二进制（按二进制名记，避免为一个探另一个也白跑一次）。 */
+  private readonly availableBinaries = new Set<string>();
 
   constructor(private readonly options: PopplerPdfDocumentAdapterOptions) {}
 
@@ -77,7 +93,7 @@ class PopplerPdfDocumentAdapter implements PdfDocumentPort {
     request: PdfDocumentRenderPagesRequest,
     options?: { signal?: AbortSignal },
   ): Promise<PdfDocumentRenderedPage[]> {
-    await this.ensureAvailable(request, options?.signal);
+    await this.ensureBinaryAvailable(request, PDFTOPPM_BINARY, options?.signal);
     let directory: string;
     try {
       directory = await mkdtemp(join(this.options.tempRoot ?? tmpdir(), "zcode-read-pdf-"));
@@ -148,14 +164,15 @@ class PopplerPdfDocumentAdapter implements PdfDocumentPort {
     }
   }
 
-  private async ensureAvailable(
+  private async ensureBinaryAvailable(
     request: PdfDocumentPageCountRequest,
+    binary: string,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (this.availabilityConfirmed) return;
+    if (this.availableBinaries.has(binary)) return;
     const result = await this.options.executionPort.run(
       {
-        command: { mode: "argv", file: "pdftoppm", args: ["-v"] },
+        command: { mode: "argv", file: binary, args: ["-v"] },
         timeoutMs: READ_PDF_AVAILABILITY_TIMEOUT_MS,
         trace: request.trace,
       },
@@ -174,13 +191,114 @@ class PopplerPdfDocumentAdapter implements PdfDocumentPort {
     if (!isAvailableProbeResult(result)) {
       throw new PdfDocumentPortError(
         "unavailable",
-        "pdftoppm is not installed. Install poppler-utils (e.g. `brew install poppler` or `apt-get install poppler-utils`) to enable PDF page rendering.",
+        `${binary} is not installed. Install poppler-utils (e.g. \`brew install poppler\` or \`apt-get install poppler-utils\`) to enable PDF page rendering.`,
         { cause: result.error?.cause },
       );
     }
     // 失败结果不能缓存；用户安装 Poppler 后同一进程应能立即恢复。
-    this.availabilityConfirmed = true;
+    this.availableBinaries.add(binary);
   }
+
+  /**
+   * 把加密 PDF 解成一份**无密副本**（`pdftocairo -pdf`）。
+   *
+   * ⚠️ **为什么要 ZCode 自己解密**：本地解析引擎（MinerU 4.1.7）没有密码入口 ——
+   * 加密 PDF 直接喂给它必报 `PDFium: Incorrect password error`。路线见
+   * docs/design/v2/ocr-local.md §3.2.1。
+   * ⚠️ **密码只经 argv**（poppler 没有 stdin / env 通道）。
+   * ⚠️ **`outputPath` 必须以 `.pdf` 结尾** —— `pdftocairo -pdf` 在输出名没有
+   * 扩展名时会自己补 `.pdf`，那副本就落到别的路径上去了。
+   */
+  async decryptToFile(
+    request: PdfDocumentDecryptRequest,
+    options?: { signal?: AbortSignal },
+  ): Promise<PdfDocumentDecryptedFile> {
+    await this.ensureBinaryAvailable(request, PDFCAIRO_BINARY, options?.signal);
+    const runDecrypt = (passwordFlag: "-upw" | "-opw") =>
+      this.options.executionPort.run(
+        {
+          command: {
+            mode: "argv",
+            file: PDFCAIRO_BINARY,
+            args: [
+              "-pdf",
+              // 单密码字段双变体：先按 user password (-upw) 试，密码不对再按 owner password (-opw) 试。
+              passwordFlag,
+              request.password,
+              request.filePath,
+              request.outputPath,
+            ],
+          },
+          timeoutMs: READ_PDF_DECRYPT_TIMEOUT_MS,
+          trace: request.trace,
+        },
+        options?.signal ? { signal: options.signal } : undefined,
+      );
+
+    let result = await runDecrypt("-upw");
+    try {
+      assertDecryptSucceeded(result);
+    } catch (error) {
+      // 仅密码类失败值得换 owner-password 变体重试一次；其他失败重试只会重复成本。
+      if (!(error instanceof PdfDocumentPortError) || error.code !== "password_protected") {
+        throw error;
+      }
+      result = await runDecrypt("-opw");
+      assertDecryptSucceeded(result);
+    }
+
+    const bytes = await decryptedFileSize(request.outputPath, options?.signal);
+    return { path: request.outputPath, bytes };
+  }
+}
+
+/** 副本落盘后的存在性与体积校验（拿不到就不是一次成功的解密）。 */
+async function decryptedFileSize(path: string, signal: AbortSignal | undefined): Promise<number> {
+  try {
+    // ⚠️ `fs.promises.stat` **不支持 AbortSignal**（只有 readFile 那些支持）⇒ 不传。
+    const info = await stat(path);
+    if (!info.isFile() || info.size <= 0) {
+      throw new PdfDocumentPortError("io_error", "PDF decryption produced an empty output file.");
+    }
+    return info.size;
+  } catch (error) {
+    if (error instanceof PdfDocumentPortError) throw error;
+    throwPdfIoError(error, signal, "Unable to read the decrypted PDF copy.");
+  }
+}
+
+/** `pdftocairo` 的失败归类：密码 / 损坏 / 其它。 */
+function assertDecryptSucceeded(result: ExecutionResult): void {
+  if (result.cancelled) {
+    throw new PdfDocumentPortError("cancelled", "PDF decryption was cancelled.");
+  }
+  if (result.timedOut || result.status === "timed_out") {
+    throw new PdfDocumentPortError(
+      "timeout",
+      `PDF decryption timed out after ${READ_PDF_DECRYPT_TIMEOUT_MS}ms.`,
+    );
+  }
+  if (result.status === "completed" && result.exitCode === 0) return;
+
+  const stderr = result.stderr.text;
+  if (INCORRECT_PASSWORD_PATTERN.test(stderr) || /password/iu.test(stderr)) {
+    throw new PdfDocumentPortError(
+      "password_protected",
+      "PDF password was rejected; the password may be incorrect.",
+    );
+  }
+  if (/damaged|corrupt|invalid/iu.test(stderr) || BROKEN_PDF_STRUCTURE_PATTERN.test(stderr)) {
+    throw new PdfDocumentPortError("corrupted", "PDF file is corrupted or invalid.");
+  }
+  const detail = [stderr, result.stdout.text, result.error?.message]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join("\n")
+    .trim();
+  throw new PdfDocumentPortError(
+    "process_failed",
+    detail.length > 0 ? `pdftocairo failed: ${detail}` : "pdftocairo failed.",
+    { cause: result.error?.cause },
+  );
 }
 
 function assertRenderSucceeded(

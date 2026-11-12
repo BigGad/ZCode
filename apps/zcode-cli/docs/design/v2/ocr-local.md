@@ -145,7 +145,26 @@ export interface OcrCapabilityInput {
 | `pages`（`all` / `auto` / `"1-5,8"`） | ⚠️ MinerU 走**整份文档**语义；子集需求用 MinerU 自己的页范围表达，不复用该字段 |
 | `languages`（`chi_sim` / `eng`） | ⚠️ **映射**到 MinerU 的语言词表（`ch` 等）—— 两套词汇表不同，**不能同名直传**；映射表待定（[`local-infra.md`](./local-infra.md) §9.2 O3） |
 | `dpi` | ⚠️ MinerU 自行决定渲染分辨率，该字段在 MinerU 路径下**不适用** → 明确拒绝 |
-| `password` | ✅ 沿用 §3 的严规矩：只经 argv、不落盘不入日志、MCP / 内置工具投影必须拒绝 |
+| `password` | ✅ **ZCode 侧前置解密**（**不是**透传给 MinerU）：MinerU 4.1.7 **没有任何密码入口**（实测，见 §3.2.1）⇒ 密码由 ZCode 自己用 poppler 解密后再把**无密副本**交给引擎。规矩不变：只经 argv、不落盘不入日志、MCP / 内置工具投影必须拒绝 |
+
+### 3.2.1 加密 PDF 的解密路线（MinerU 路径）
+
+⚠️ **实测（MinerU 4.1.7，2026-11-12）**：加密 PDF 直接喂给引擎**必然失败** —— `mineru-kit parse <加密.pdf>` 报 `Failed to load document (PDFium: Incorrect password error).`；引擎的密码入口**根本不存在**：`mineru-kit parse --help` 与 `mineru parse --help` 都没有 `--password`，`mineru/parser/__init__.py::parse()` 与 `docvortex.document.pdf.PDFDocument.__init__` 的签名里也没有密码参数。
+
+⇒ **密码由 ZCode 自己消费**，不是透传给引擎：
+
+| 步骤 | 谁做 | 说明 |
+| --- | --- | --- |
+| ① 探加密状态 | `LocalInfraPort` → `PdfDocumentPort`（poppler `pdfinfo`） | 不带密码探一次：报密码错 ⇒ 加密 |
+| ② 没给密码 | 端口**直接失败** | 报 `password_protected`（对外 `invalid_input`）⇒ **不空跑一次引擎** |
+| ③ 给了密码 | 端口先探「密码对不对」 | 密码被拒 ⇒ `password_protected`（对外仍是 `invalid_input`） |
+| ④ 解密 | `PdfDocumentPort` 的 poppler 实现（`pdftocairo -pdf -upw/-opw`） | 产出**临时无密副本**（系统临时目录），密码**只经 argv** |
+| ⑤ 解析 | 端口把**副本**交给 MinerU | **原文件不动**；sidecar 的指纹仍取**原文件** |
+| ⑥ 清理 | 端口在解析结束后删掉临时副本 | 不在用户目录里留解密内容 |
+
+⚠️ **解密副本经 cairo 重编码**（`pdftocairo -pdf` 走 cairo 后端）⇒ 矢量内容理论上可能被光栅化。**实测（2026-11-12）**：同一份 PDF 的原文与解密副本分别过 MinerU，**元素模型逐项一致**（块类型 / bbox / `image_source` 全同）⇒ 对 OCR 产物无可见影响。但这是**实测结论而非保证**，引擎或 poppler 换版后要重测。
+⚠️ **`pdftocairo` 是 poppler 自带的**（不是 ZCode 的新依赖）：没装 poppler 时，加密 PDF 这条路走不通（报 `unavailable`）；**未加密**的 PDF 不受影响（根本不会调 `pdftocairo`）。
+⚠️ **端口没有 poppler 时**（`LocalInfraDeps.pdf` 未注入）走**兜底判定**：引擎跑完在 stderr 里认「Incorrect password」，同样归一成 `password_protected` ⇒ 对外 `invalid_input`（代价是白跑一次引擎）。
 
 ### 3.3 输出按引擎分流
 
@@ -830,7 +849,7 @@ adapters/port-wiring 装配 → EnginePort / PdfDocumentPort
 | 引擎在但 `probe` 返回可用，跑起来却失败 | `process_failed` | `internal` | `1` | `details.engineCode` + stderr 尾（**不含路径里的凭据**，本命令无凭据） |
 | 输入不是 PDF / 图片 | `unsupported_input` | `unsupported_input` | `1` | |
 | 文件损坏 | `corrupted` | `invalid_input` | `1` | `details.engineCode = "corrupted"` |
-| 密码 PDF 且未给密码 | `password_protected` | `invalid_input` | `1` | `hint` 说明用 `--pdf-password`；**密码只经 argv 传递，不落盘、不入日志**（沿用 `pdf-document.port.ts` 的约定）。⚠️ **2026-11-12**：`zcode ocr` 积木**正式收 `--pdf-password`**（[`capability-cli-blocks.md`](./capability-cli-blocks.md) D16）；⚠️ **当前实现会静默忽略它**（`OcrFlags` 无此字段）⇒ 实施时必须补上，否则这条 hint 与实际行为不符 |
+| 密码 PDF 且未给密码 | `password_protected` | `invalid_input` | `1` | `hint` 说明用 `--pdf-password`；**密码只经 argv 传递，不落盘、不入日志**（沿用 `pdf-document.port.ts` 的约定）。✅ **2026-11-12 已实施**（[`capability-cli-blocks.md`](./capability-cli-blocks.md) v2.2）：端口在**调引擎前**用 poppler 探加密状态 ⇒ **未给密码直接报这个码，不空跑一次引擎**；解密路线见 §3.2.1 |
 | 某页识别失败（渲染失败 / tesseract 非零退出） | — | — | — | **不中断整批**：该页记为失败，其余页继续；最终若**全部**页失败才报错 |
 | **预处理失败**（解码失败 / 估角异常 / 写 PGM 失败） | — | — | — | **降级**：跳过预处理，把原图直接交给引擎，该页记一条 warning。预处理是**增益**不是**前提**，不该因为它把整页 OCR 拖垮 |
 | 用户取消 | `cancelled` | `cancelled` | `130` | |
@@ -843,6 +862,8 @@ adapters/port-wiring 装配 → EnginePort / PdfDocumentPort
 | MinerU 没装 / 跑不起来 | `engine_unavailable` | `unavailable` | `1` | `hint` 给装法（`uv tool install "mineru>=4.0,<5"`）；**用户自装，ZCode 不代装**（[`local-infra.md`](./local-infra.md) §3.1） |
 | 显式档位不可用 | — | **不报错** | `0` | **降级 + 告知**：降到可用档位重跑一次，原因写进 `metrics.warnings[]`（[`local-infra.md`](./local-infra.md) §5.2） |
 | MinerU 退出码 0 但**产物缺失** | `artifact_missing` | `internal` | `1` | ⚠️ **不得当成功** —— 与上面 TSV 那行同一个坑 |
+| **加密 PDF，给了密码但密码被拒** | `password_protected` | `invalid_input` | `1` | poppler 解密阶段就拒了（密码错 / 只设了 owner 密码）；`hint` 说明密码可能被拒。⚠️ 引擎自己**认不出**这个情形（它只会报 PDFium 的 `Incorrect password`）⇒ 由 ZCode 侧判定（§3.2.1） |
+| **加密 PDF，给了密码且解密成功** | — | **不报错** | `0` | ZCode 侧前置解密（§3.2.1）：引擎拿到的是**临时无密副本**，解析完即删 |
 
 ⚠️ **降级不是错误**：档位降级属"可用优先"（D3），走 `metrics.warnings[]` + 成功退出，**不进 `error`**。只有"全链都不可用"才是 `unavailable`。
 

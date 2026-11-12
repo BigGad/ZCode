@@ -953,7 +953,7 @@ OCR 能力的引擎选择**不再由能力层做**：能力把文档交给 `loca
 | `strategy`（"fill" / "override"） | MinerU 不区分 → **明确拒绝** |
 | `languages`（`chi_sim` / `eng`） | ⏸️ **暂不支持**：实测 `mineru-kit parse` **没有语言选项** ⇒ 二期等引擎支持指定语言后，再做"两套词汇表必须显式映射、不能同名直传"的映射表 |
 | `dpi` | MinerU 自行决定渲染分辨率 ⇒ **明确拒绝** |
-| `password` | 沿用 `ocr-local.md` §3 的严规矩：只经 argv、不落盘不入日志、MCP / 内置工具投影必须拒绝 |
+| `password` | 沿用 `ocr-local.md` §3 的严规矩：只经 argv、不落盘不入日志、MCP / 内置工具投影必须拒绝。⚠️ **2026-11-12 补充**：MinerU 4.1.7 **没有密码入口**（实测 `mineru-kit parse` 报 `Failed to load document (PDFium: Incorrect password error).`）⇒ 密码**不由引擎消费**，而是由 ZCode 侧 poppler **前置解密**（路线见 [`ocr-local.md`](./ocr-local.md) §3.2.1） |
 
 ⚠️ `ocr-local.md` §3 的 `OcrCapabilityInput` / `OcrCapabilityOutput` 也要一并改（**§10 同步清单里已补上**）。⚠️ **`OcrCapabilityOutput` 必须是**唯一**一份声明**（上一版在同一个 spec 里声明了两次，形状冲突且 TypeScript 直接编译报错）。
 

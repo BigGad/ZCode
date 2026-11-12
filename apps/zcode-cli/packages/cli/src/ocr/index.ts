@@ -1,4 +1,4 @@
-import type { LocalInfraConfig, LocalInfraPort } from "@zcode/contracts";
+import type { FileSystemPort, LocalInfraConfig, LocalInfraPort } from "@zcode/contracts";
 import { createLocalInfraPort } from "@zcode/adapters/local-infra";
 import { createNodeExecutionAdapter } from "@zcode/adapters/exec";
 import { createNodeFileSystemAdapter } from "@zcode/adapters/fs";
@@ -21,6 +21,12 @@ import { OCR_EXIT_ERROR, OCR_EXIT_OK, type OcrContext } from "./output.js";
  */
 export interface OcrRuntime {
   readonly port: LocalInfraPort;
+  /**
+   * 文件系统端口（sidecar 的指纹、读写）。
+   * ⚠️ **与 `port` 用同一个实例** —— 命令面不许自己 new 一个 `FileSystemPort`，
+   * 会出现两套原子写与路径规范化。
+   */
+  readonly fileSystem: FileSystemPort;
   /** 释放运行时持有的资源（可选）。 */
   readonly dispose?: () => Promise<void> | void;
 }
@@ -36,7 +42,7 @@ export const OCR_USAGE = `zcode ocr —— 本地 OCR / 文档解析能力面
 
 用法：
   zcode ocr doctor [--json]
-  zcode ocr parse --path <文件> [--output <目录>] [--tier <档位>] [--json]
+  zcode ocr parse --path <文件> [--output <目录>] [--tier <档位>] [--force] [--pdf-password <密码>] [--json]
   zcode ocr models download --tier <basic|standard> [--source <源>] [--json]
 
 子命令：
@@ -49,12 +55,21 @@ export const OCR_USAGE = `zcode ocr —— 本地 OCR / 文档解析能力面
   --output <目录>  产物输出目录（默认 <源文件名>.mineru/）
   --tier <档位>    解析档位：flash / basic / standard / advanced
   --source <源>    模型源：auto / huggingface / modelscope
+  --force          忽略 sidecar 缓存，强制重算并覆盖
+  --pdf-password <密码>  加密 PDF 的密码（只经 argv 传递，不落盘、不入日志）
   --json           以单个 JSON 对象输出到 stdout
   --help, -h       显示本帮助
+
+产物：
+  - 解析成功后在源文件旁写 <源文件名>.zcode-ocr.json（sidecar），
+    内含逐页成分与逐元素信息；下次同样的解析会命中它（源文件内容变了会自动重算）。
+  - sidecar 里的一切路径都是相对路径：artifactsDir 相对 sidecar 所在目录，
+    产物路径相对 artifactsDir。
 
 说明：
   - ZCode 只检测并调用本机已装好的 MinerU，不负责安装（引擎与 Python 环境由用户自装）。
   - 引擎不可用时 doctor 会给出装法；解析时按档位链降级并在 warnings 中告知。
+  - --json 时 stdout 只有信封一个 JSON 对象，进度走 stderr（每行一个 NDJSON 事件）。
 `;
 
 /**
@@ -83,11 +98,13 @@ export async function runOcrCommand(
       case "doctor":
         return await runDoctorCommand(ctx, runtime.port, { json: command.json });
       case "parse":
-        return await runParseCommand(ctx, runtime.port, {
+        return await runParseCommand(ctx, runtime.port, runtime.fileSystem, {
           json: command.json,
           path: command.path,
           ...(command.output !== undefined ? { output: command.output } : {}),
           ...(command.tier !== undefined ? { tier: command.tier } : {}),
+          ...(command.force !== undefined ? { force: command.force } : {}),
+          ...(command.pdfPassword !== undefined ? { pdfPassword: command.pdfPassword } : {}),
         });
       case "models-download":
         return await runModelsDownloadCommand(ctx, runtime.port, {
@@ -123,7 +140,7 @@ async function createDefaultRuntime(options: OcrCommandOptions): Promise<OcrRunt
     config,
     pdf: createPopplerPdfDocumentAdapter({ executionPort: execution }),
   });
-  return { port };
+  return { port, fileSystem };
 }
 
 /**

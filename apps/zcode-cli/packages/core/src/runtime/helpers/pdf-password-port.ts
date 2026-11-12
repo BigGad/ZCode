@@ -51,6 +51,11 @@ export function createPasswordAwarePdfDocumentPort(
         deps.inner.renderPages(password ? { ...request, password } : request, options),
       );
     },
+    decryptToFile(request, options) {
+      // ⚠️ **解密不走问询解锁**：请求里**必定**已经带了密码（CLI 的 `--pdf-password`），
+      // 问询拿到的是「读一页」的密码，语义不同；这里只做直通委托。
+      return deps.inner.decryptToFile(request, options);
+    },
   };
 }
 

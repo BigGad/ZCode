@@ -81,7 +81,16 @@ export type LocalInfraErrorCode =
   | "process_failed"
   | "artifact_missing"
   | "timeout"
-  | "input_invalid";
+  | "input_invalid"
+  /**
+   * 加密 PDF 的密码被拒（或压根没给）。
+   *
+   * ⚠️ **引擎认不出这个情形** —— MinerU 4.1.7 没有密码入口，加密 PDF 直接喂进去
+   * 只会在 stderr 留一句 `PDFium: Incorrect password error`，从外面看是「引擎崩了」。
+   * ⇒ 由 ZCode 侧在调引擎前判定（spec：docs/design/v2/ocr-local.md §3.2.1），
+   * 对外归一为 `invalid_input`。
+   */
+  | "password_protected";
 
 export interface LocalInfraError {
   /** 内部码；对外归一由能力层做。 */
@@ -183,6 +192,52 @@ export interface LocalInfraDoctorReport {
   readonly durationMs: number;
 }
 
+/**
+ * 文档里的一个元素（**引擎无关**的中间模型）。
+ *
+ * ⚠️ **不带 `category`** —— 分类规则（`type` → `text` / `image` / `other`）是 zcode 的
+ * 统一口径（spec：capability-cli-blocks.md §6.4），由 core 的积木层算；
+ * 端口只负责把**引擎的原始类型名**如实带出来。
+ */
+export interface LocalDocumentElement {
+  /** 引擎给的类型名（**开放字符串**，随引擎与档位变化）。 */
+  readonly type: string;
+  /** 归一化四元组 `[x0, y0, x1, y1]`（分母是页级 `widthPt` / `heightPt`）。 */
+  readonly bbox: readonly [number, number, number, number];
+  /** 文本类元素的文本内容；图片类元素**没有**文本。 */
+  readonly text?: string;
+  /** 图片路径，**相对产物目录**（`LocalParseOutput.outputDir`）。 */
+  readonly imagePath?: string;
+  /**
+   * 元素来源：`"engine"` = 引擎从版面里裁出来的图；`"rendered"` = zcode 自己渲染的整页图。
+   * 不给按 `"engine"` 处理（引擎产出的元素都是引擎给的）。
+   */
+  readonly origin?: "engine" | "rendered";
+}
+
+/** 文档里的一页。 */
+export interface LocalDocumentPage {
+  /** **0 基**页号（与 MinerU `page_idx` 一致）。 */
+  readonly pageIndex: number;
+  /** 页宽（pt）。缺失时为 0 —— 分类不依赖它。 */
+  readonly widthPt: number;
+  /** 页高（pt）。缺失时为 0。 */
+  readonly heightPt: number;
+  /** 该页分析成功（**含「没分析出东西」**）还是分析出错。 */
+  readonly status: "ok" | "failed";
+  readonly elements: readonly LocalDocumentElement[];
+}
+
+/** 一份文档的**元素级**模型（积木层据此写 sidecar）。 */
+export interface LocalDocumentModel {
+  readonly pages: readonly LocalDocumentPage[];
+  /** 产物里记录的生产者（引擎名与版本），用于 sidecar 的 `engine` 块。 */
+  readonly producer?: {
+    readonly name?: string;
+    readonly version?: string;
+  };
+}
+
 export interface LocalParseRequest {
   /** 待解析文件的绝对路径。 */
   readonly path: string;
@@ -190,6 +245,16 @@ export interface LocalParseRequest {
   readonly outputDir?: string;
   /** 显式指定档位；不给 = 用 MinerU 的 `default_request_tier`。 */
   readonly tier?: MineruTier;
+  /**
+   * 要不要回传**元素级文档模型**（`LocalParseOutput.documentModel`）。
+   * ⚠️ **默认 false**：模型带全文，体积随正文增长；只有要写 sidecar / 派生文字的调用方才要。
+   */
+  readonly documentModel?: boolean;
+  /**
+   * 加密 PDF 的密码。
+   * ⚠️ **只经 argv 传递，不落盘、不入日志、不进事件**（同 `pdf-document.port.ts` 的约定）。
+   */
+  readonly password?: string;
 }
 
 export interface LocalParseOutput {
@@ -208,6 +273,8 @@ export interface LocalParseOutput {
    * 消费方按 `relative(markdownDir, assetsDir)` 还原目录名再一起搬。
    */
   readonly assetsDir?: string;
+  /** 元素级文档模型（请求了 `documentModel` 才有）。 */
+  readonly documentModel?: LocalDocumentModel;
 }
 
 export interface LocalParseResult {

@@ -535,7 +535,11 @@ export const run = async (ctx: RunContext, deps: RunDependencies = {}): Promise<
   if (
     pdfPasswordOption !== undefined &&
     typeof parsed.values.prompt !== "string" &&
-    targetRequest === undefined
+    targetRequest === undefined &&
+    // ⚠️ **`zcode ocr` 是例外**：它是**独立命令组**，`zcode ocr parse` 自己消费
+    // `--pdf-password`（spec：capability-cli-blocks.md D16 / ocr-local.md §3.2.1）⇒
+    // 这条「只服务无头链路」的作用域检查对它不适用（否则 flag 收得到却用不了）。
+    commandName(parsed.positionals) !== "ocr"
   ) {
     ctx.stderr.write(`${PDF_PASSWORD_SCOPE_ERROR}\n`);
     return 1;
@@ -610,6 +614,12 @@ export const run = async (ctx: RunContext, deps: RunDependencies = {}): Promise<
           ...(typeof parsed.values.output === "string" ? { output: parsed.values.output } : {}),
           ...(typeof parsed.values.tier === "string" ? { tier: parsed.values.tier } : {}),
           ...(typeof parsed.values.source === "string" ? { source: parsed.values.source } : {}),
+          // ⚠️ `--force` / `--pdf-password` 是全局旗标（`arguments.ts` 里已注册），
+          // 但**作用域限定在 `zcode ocr parse`** —— 组合校验在 `ocr/arguments.ts`。
+          ...(parsed.values.force === true ? { force: true } : {}),
+          ...(typeof parsed.values["pdf-password"] === "string"
+            ? { pdfPassword: parsed.values["pdf-password"] }
+            : {}),
         },
         json: parsed.values.json === true,
         help: parsed.values.help === true,

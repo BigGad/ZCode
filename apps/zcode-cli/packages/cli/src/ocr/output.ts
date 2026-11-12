@@ -1,4 +1,16 @@
-import type { LocalInfraError } from "@zcode/contracts";
+import type {
+  CapabilityEnvelope,
+  CapabilityProgressEvent,
+  CapabilityProgressPhase,
+} from "@zcode/contracts";
+import { exitCodeForCapabilityError } from "@zcode/core";
+
+/**
+ * `zcode ocr` 的输出通道（spec：docs/design/v2/capability-cli-blocks.md §5）。
+ *
+ * ⚠️ **stdout 恒为单个 JSON 对象**（`--json` 时），进度与告警只走 stderr ——
+ * MinerU 自己的 stdout 是人读文本（`已解析 1 个输入。`），**不得当 JSON 解析**。
+ */
 
 /** 退出码：成功。 */
 export const OCR_EXIT_OK = 0;
@@ -6,63 +18,65 @@ export const OCR_EXIT_OK = 0;
 export const OCR_EXIT_ERROR = 1;
 /** 退出码：超时（与 `capability-registry.md` §7 的能力退出码表同源）。 */
 export const OCR_EXIT_TIMEOUT = 124;
+/** 退出码：取消。 */
+export const OCR_EXIT_CANCELLED = 130;
 
-/**
- * `zcode ocr` 的输出通道。
- *
- * ⚠️ **stdout 恒为单个 JSON 对象**（`--json` 时），进度与告警只走 stderr ——
- * MinerU 自己的 stdout 是人读文本（`已解析 1 个输入。`），**不得当 JSON 解析**。
- */
 export interface OcrContext {
   readonly stdout: { write(chunk: string): unknown };
   readonly stderr: { write(chunk: string): unknown };
 }
 
-export function writeJson(ctx: OcrContext, value: unknown): void {
-  ctx.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+/**
+ * 写信封到 stdout。
+ *
+ * ⚠️ **`--json` 时 stdout 只有这一个 JSON 对象** —— 业务 `JSON.parse(stdout)` 即可。
+ */
+export function writeEnvelope(ctx: OcrContext, envelope: CapabilityEnvelope): void {
+  ctx.stdout.write(`${JSON.stringify(envelope, null, 2)}\n`);
 }
 
 /**
- * 内部码 → 对外归一的能力码（spec §7.6）。
+ * 进度与错误的上报通道（spec §5.6）。
  *
- * ⚠️ `error.code` 对外是**归一后的能力码**，内部码放在 `details.engineCode` ——
- * 业务方按能力码分支，运维按内部码定位。
+ * ⚠️ **`--json` 时 stderr 是纯进度流**：每行一个 NDJSON 事件（`{"type":"progress",…}`）。
+ * ⚠️ **错误不进 stderr**（JSON 模式）—— 错误只在 stdout 信封里 + 退出码，
+ * ⇒ 业务逐行解析 stderr **不会混进非 JSON 行**。
+ * ⚠️ **非 `--json` 时 stderr 是人读文本**（进度行 + 末尾一行错误）。
  */
-export function normalizeErrorCode(error: LocalInfraError): string {
-  switch (error.code) {
-    case "engine_not_found":
-      return "invalid_input";
-    case "engine_unavailable":
-      return "unavailable";
-    case "process_failed":
-      return "internal";
-    case "artifact_missing":
-      return "internal";
-    case "timeout":
-      return "timeout";
-    case "input_invalid":
-      // §7.6：文件不存在 → not_found；类型不支持 → unsupported_input。
-      return error.details?.reason === "unsupported_input" ? "unsupported_input" : "not_found";
-  }
+export interface OcrReporter {
+  /** 进度事件。`percent` 不可知时传 `null`（不许拿假百分比糊弄业务）。 */
+  progress(phase: CapabilityProgressPhase, message: string): void;
+  /** 错误行。JSON 模式下是 no-op（错误只进信封）。 */
+  error(message: string): void;
 }
 
-export interface JsonError {
-  readonly code: string;
-  readonly message: string;
-  readonly hint?: string;
-  readonly details: Record<string, unknown>;
+export function createReporter(ctx: OcrContext, json: boolean): OcrReporter {
+  return json ? createJsonReporter(ctx) : createTextReporter(ctx);
 }
 
-export function toJsonError(error: LocalInfraError): JsonError {
+function createJsonReporter(ctx: OcrContext): OcrReporter {
   return {
-    code: normalizeErrorCode(error),
-    message: error.message,
-    ...(error.hint !== undefined ? { hint: error.hint } : {}),
-    details: { ...error.details, engineCode: error.code },
+    progress(phase, message) {
+      const event: CapabilityProgressEvent = { type: "progress", phase, message, percent: null };
+      ctx.stderr.write(`${JSON.stringify(event)}\n`);
+    },
+    // ⚠️ JSON 模式：**错误不进 stderr**（spec §5.6）——只在 stdout 信封里。
+    error() {},
   };
 }
 
-/** 失败结果对应的退出码。 */
-export function exitCodeForError(error: LocalInfraError): number {
-  return error.code === "timeout" ? OCR_EXIT_TIMEOUT : OCR_EXIT_ERROR;
+function createTextReporter(ctx: OcrContext): OcrReporter {
+  return {
+    progress(_phase, message) {
+      ctx.stderr.write(`${message}\n`);
+    },
+    error(message) {
+      ctx.stderr.write(`${message}\n`);
+    },
+  };
+}
+
+/** 信封对应的退出码（spec §5.2）。 */
+export function exitCodeForEnvelope(envelope: CapabilityEnvelope): number {
+  return envelope.ok ? OCR_EXIT_OK : exitCodeForCapabilityError(envelope.error.code);
 }

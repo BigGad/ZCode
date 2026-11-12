@@ -42,6 +42,10 @@
       "types": "./dist/capabilities/index.d.ts",
       "import": "./dist/capabilities/index.js"
     },
+    "./capability-blocks": {
+      "types": "./dist/capability-blocks/index.d.ts",
+      "import": "./dist/capability-blocks/index.js"
+    },
     "./config": {
       "types": "./dist/config/index.d.ts",
       "import": "./dist/config/index.js"

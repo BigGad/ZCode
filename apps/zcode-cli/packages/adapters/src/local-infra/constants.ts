@@ -24,6 +24,23 @@ export const MODELS_SHOW_TIMEOUT_MS = 60_000;
 export const MODELS_DOWNLOAD_TIMEOUT_MS = 60 * 60_000;
 
 /**
+ * 加密 PDF 的处置提示（对外错误码 `invalid_input`）。
+ * ⚠️ 措辞里**不出现密码本身**，只说怎么给 —— 密码只经 argv 传递，不落盘、不入日志
+ * （沿用 `pdf-document.port.ts` 的约定）。
+ */
+export const PDF_PASSWORD_REQUIRED_HINT =
+  "加密 PDF 需要密码：用 --pdf-password <密码> 重试（密码只经 argv 传递，不落盘、不入日志）";
+export const PDF_PASSWORD_REJECTED_HINT =
+  "PDF 密码被拒绝：请确认密码是否正确（密码只经 argv 传递，不落盘、不入日志）";
+
+/**
+ * 引擎 stderr 里代表「密码不对」的片段。
+ * ⚠️ MinerU 没有密码入口，加密 PDF 直接喂进去只会在 PDFium 层报这句
+ * `Failed to load document (PDFium: Incorrect password error).`
+ */
+export const INCORRECT_PASSWORD_PATTERN = /incorrect password/iu;
+
+/**
  * 冷启动预算：首次加载模型 + 运行时初始化。
  * 实测首次 parse 显著慢于后续（见 spec §11.0），所以超时必须先留足冷启动再叠页数预算。
  */

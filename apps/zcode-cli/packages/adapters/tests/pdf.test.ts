@@ -555,6 +555,97 @@ describe("Poppler PDF adapter password handling", () => {
       adapter.getPageCount({ filePath: "/tmp/missing.pdf", trace: trace() }),
     ).resolves.toBeUndefined();
   });
+
+  /**
+   * 解密（`pdftocairo -pdf`）—— spec：docs/design/v2/ocr-local.md §3.2.1。
+   *
+   * ⚠️ 存在的理由：本地解析引擎（MinerU 4.1.7）**没有密码入口**，加密 PDF 直接
+   * 喂给它必报 `PDFium: Incorrect password error` ⇒ 密码由 ZCode 侧用 poppler 解密。
+   */
+  it("decrypts with pdftocairo, passing the password only through argv", async () => {
+    const tempRoot = await temporaryRoot();
+    const outputPath = join(tempRoot, "locked.pdf");
+    const requests: ExecutionRequest[] = [];
+    const executionPort = executionPortWith(async (request) => {
+      requests.push(request);
+      const args = request.command.mode === "argv" ? (request.command.args ?? []) : [];
+      if (args.includes("-v")) return completedResult();
+      await writeFile(outputPath, "%PDF-1.7 decrypted");
+      return completedResult();
+    });
+    const adapter = createPopplerPdfDocumentAdapter({ executionPort, tempRoot });
+
+    const decrypted = await adapter.decryptToFile({
+      filePath: "/tmp/locked.pdf",
+      password: "pw",
+      outputPath,
+      trace: trace(),
+    });
+
+    expect(decrypted.path).toBe(outputPath);
+    expect(decrypted.bytes).toBeGreaterThan(0);
+    // ⚠️ argv 形状固定：`-pdf -upw <密码> <输入> <输出>` —— 密码**只经 argv**。
+    expect(requests[1]).toMatchObject({
+      command: {
+        mode: "argv",
+        file: "pdftocairo",
+        args: ["-pdf", "-upw", "pw", "/tmp/locked.pdf", outputPath],
+      },
+      timeoutMs: 120_000,
+    });
+  });
+
+  it("retries with the owner-password variant once, then reports password_protected", async () => {
+    const tempRoot = await temporaryRoot();
+    const outputPath = join(tempRoot, "locked.pdf");
+    const requests: ExecutionRequest[] = [];
+    const executionPort = executionPortWith(async (request) => {
+      requests.push(request);
+      const args = request.command.mode === "argv" ? (request.command.args ?? []) : [];
+      if (args.includes("-v")) return completedResult();
+      return failedResult("Command Line Error: Incorrect password\nError opening PDF file.");
+    });
+    const adapter = createPopplerPdfDocumentAdapter({ executionPort, tempRoot });
+
+    await expect(
+      adapter.decryptToFile({
+        filePath: "/tmp/locked.pdf",
+        password: "wrong",
+        outputPath,
+        trace: trace(),
+      }),
+    ).rejects.toMatchObject({
+      code: "password_protected",
+      message: "PDF password was rejected; the password may be incorrect.",
+    });
+    // ① 先试 user password；② 密码类失败才换 owner password 试一次。
+    const decryptCalls = requests.filter((request) => {
+      const args = request.command.mode === "argv" ? (request.command.args ?? []) : [];
+      return args.includes("-pdf");
+    });
+    expect(decryptCalls).toHaveLength(2);
+    expect(decryptCalls[0]).toMatchObject({
+      command: { args: ["-pdf", "-upw", "wrong", "/tmp/locked.pdf", outputPath] },
+    });
+    expect(decryptCalls[1]).toMatchObject({
+      command: { args: ["-pdf", "-opw", "wrong", "/tmp/locked.pdf", outputPath] },
+    });
+  });
+
+  it("reports unavailable when pdftocairo is not installed", async () => {
+    const tempRoot = await temporaryRoot();
+    const executionPort = executionPortWith(async () => spawnFailure("spawn pdftocairo ENOENT"));
+    const adapter = createPopplerPdfDocumentAdapter({ executionPort, tempRoot });
+
+    await expect(
+      adapter.decryptToFile({
+        filePath: "/tmp/locked.pdf",
+        password: "pw",
+        outputPath: join(tempRoot, "locked.pdf"),
+        trace: trace(),
+      }),
+    ).rejects.toMatchObject({ code: "unavailable" });
+  });
 });
 
 function executionPortWith(run: (request: ExecutionRequest) => Promise<ExecutionResult>) {

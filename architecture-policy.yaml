@@ -436,6 +436,31 @@ modules:
     layers:
       app: .
     owner: conversation
+  # cli-capability-blocks：由 architecture:adopt 登记
+  - id: cli-capability-blocks
+    roots:
+      - apps/zcode-cli/packages/contracts/src/capability-blocks
+    managed: true
+    requires: []
+    publicEntrypoints:
+      - apps/zcode-cli/packages/contracts/src/capability-blocks/index.ts
+      - apps/zcode-cli/packages/contracts/src/capability-blocks/contract.ts
+    layers:
+      domain: .
+    owner: agent
+  # cli-capability：由 architecture:adopt 登记
+  - id: cli-capability
+    roots:
+      - apps/zcode-cli/packages/core/src/capability
+    managed: true
+    requires:
+      - zcode-cli
+    publicEntrypoints:
+      - apps/zcode-cli/packages/core/src/capability/index.ts
+      - apps/zcode-cli/packages/core/src/capability/contract.ts
+    layers:
+      app: .
+    owner: agent
   # web-remote-relay：由 architecture:adopt 登记
   - id: web-remote-relay
     roots:
@@ -1613,7 +1638,8 @@ exceptions:
       - apps/zcode-cli/packages/cli/src/ocr/doctor-command.ts
       - apps/zcode-cli/packages/cli/src/ocr/parse-command.ts
       - apps/zcode-cli/packages/cli/src/ocr/models-command.ts
-    reason: 本地模型/解析基础设施（2026-11-09，spec：apps/zcode-cli/docs/design/v2/local-infra.md；2026-11-11 命令面改名与 CLI 原子化修订）。三层各自有单一所有者：contracts 的 local-infra.port.ts 只声明端口（纯接口，不含 zod）；adapters 的 local-infra/* 负责引擎定位、档位判定、子进程调用与产物分类，zip-extract.ts 是它的通用解包工具；cli 的 ocr/* 只做组合校验、输出投影与退出码。依赖方向 contracts ← adapters ← cli 未变。⚠️ `zcode ocr` 是 `zcode` 的**子命令组**（不是独立二进制），故 cli 的 ocr/* 不再要求"不 import run.ts"，但仍不 import @zcode/bootstrap / @zcode/core 以免把 Agent 运行时打进命令面。接管整个 contracts/adapters/cli 包不在本次范围内。
+      - apps/zcode-cli/packages/cli/src/ocr/sidecar-store.ts
+    reason: 本地模型/解析基础设施（2026-11-09，spec：apps/zcode-cli/docs/design/v2/local-infra.md；2026-11-11 命令面改名与 CLI 原子化修订；2026-11-12 能力积木 CLI 统一信封与 sidecar v3，spec：apps/zcode-cli/docs/design/v2/capability-cli-blocks.md）。三层各自有单一所有者：contracts 的 local-infra.port.ts 只声明端口（纯接口，不含 zod）；adapters 的 local-infra/* 负责引擎定位、档位判定、子进程调用与产物分类，zip-extract.ts 是它的通用解包工具；cli 的 ocr/* 只做组合校验、输出投影、退出码与 sidecar 存取（sidecar-store.ts 的文件 IO 一律走 FileSystemPort，不直接碰 node:fs）。依赖方向 contracts ← adapters ← cli 未变。⚠️ `zcode ocr` 是 `zcode` 的**子命令组**（不是独立二进制），故 cli 的 ocr/* 不再要求"不 import run.ts"；cli 的 ocr/* import 的 @zcode/core 只取**能力积木层**（信封构造、错误归一、sidecar 纯函数——无 IO、无运行时依赖），这是 cli 包既有依赖方向（core 不反向依赖 cli），不是新增耦合。接管整个 contracts/adapters/cli 包不在本次范围内。
   - id: capability-provisioning-unmanaged-files
     rule: unmanaged-new-file
     paths:

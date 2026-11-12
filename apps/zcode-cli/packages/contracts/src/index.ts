@@ -73,6 +73,9 @@ export * from "./skills/index.js";
 // Custom Commands
 export * from "./commands/index.js";
 
+// 能力积木契约（业务侧 CLI 接入面；spec：docs/design/v2/capability-cli-blocks.md）
+export * from "./capability-blocks/index.js";
+
 // Plugins
 export * from "./plugins/index.js";
 
