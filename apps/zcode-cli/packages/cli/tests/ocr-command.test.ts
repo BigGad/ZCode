@@ -1,16 +1,22 @@
 import assert from "node:assert/strict";
+import { dirname, join } from "node:path";
 import test from "node:test";
-import type {
-  LocalInfraDoctorReport,
-  LocalInfraPort,
-  LocalModelsDownloadRequest,
-  LocalModelsDownloadResult,
-  LocalParseRequest,
-  LocalParseResult,
+import {
+  CAPABILITY_BLOCK_IDS,
+  CAPABILITY_ERROR_CODES,
+  type LocalInfraDoctorReport,
+  type LocalInfraErrorCode,
+  type LocalInfraPort,
+  type LocalModelsDownloadRequest,
+  type LocalModelsDownloadResult,
+  type LocalParseRequest,
+  type LocalParseResult,
 } from "@zcode/contracts";
 import type { RunContext } from "@zcode/shared-types";
+import { buildFailureEnvelope, buildSuccessEnvelope } from "@zcode/core";
 import { runOcrCommand } from "../src/ocr/index.js";
 import type { OcrCommandInput } from "../src/ocr/arguments.js";
+import { exitCodeForEnvelope } from "../src/ocr/output.js";
 import { run as runCli } from "../src/run.js";
 import { MemoryFileSystem } from "./fixtures/memory-file-system.js";
 
@@ -796,6 +802,346 @@ test("models download 的引擎输出只走 stderr，不混进 stdout 的 JSON",
   assert.equal(result.exitCode, 0);
   assert.ok(!result.stdout.includes("已下载 1 个仓库。"));
   assert.match(result.stderr, /已下载 1 个仓库。/);
+});
+
+// ---------------------------------------------------------------------------
+// 契约闭集与积木边界（spec §10.1 / §10.3）
+// ---------------------------------------------------------------------------
+
+/** 并发用例用的假端口：按请求路径给出各自的产物目录。 */
+function perPathStubPort(): StubPort {
+  const parseCalls: LocalParseRequest[] = [];
+  const downloadCalls: LocalModelsDownloadRequest[] = [];
+
+  const port: LocalInfraPort = {
+    async doctor() {
+      return {
+        engines: [],
+        supportedTiers: [],
+        models: [],
+        weightsFetched: false,
+        durationMs: 1,
+      };
+    },
+    async parse(request) {
+      parseCalls.push(request);
+      const base = request.path.replace(/\.pdf$/u, "");
+      const name = base.split("/").pop() ?? "doc";
+      return {
+        ok: true,
+        engine: "mineru",
+        tier: "basic",
+        output: {
+          outputDir: `${base}.mineru`,
+          markdownPath: `${base}.mineru/${name}.md`,
+          documentModel: {
+            pages: [
+              {
+                pageIndex: 0,
+                widthPt: 595,
+                heightPt: 842,
+                status: "ok",
+                elements: [{ type: "text", bbox: [0, 0, 1, 1], text: name }],
+              },
+            ],
+            producer: { name: "mineru", version: "4.1.7" },
+          },
+        },
+        warnings: [],
+        durationMs: 1,
+      };
+    },
+    async downloadModels(request) {
+      downloadCalls.push(request);
+      return { ok: true, engine: "mineru", tier: "basic", warnings: [], durationMs: 1 };
+    },
+  };
+
+  return { port, parseCalls, downloadCalls };
+}
+
+test("§10.1: 四个积木的 key 都在闭集里，且闭集恰好是这四个", async () => {
+  const doctor = await runOcr(input(["doctor"], {}, { json: true }));
+  const inspect = await runOcr(input(["inspect"], { path: SOURCE_PATH }, { json: true }));
+  const parse = await runOcr(input(["parse"], { path: SOURCE_PATH }, { json: true }));
+  const download = await runOcr(input(["models", "download"], { tier: "basic" }, { json: true }));
+
+  const keys = [doctor, inspect, parse, download].map((result) => envelopeOf(result.stdout).key);
+  for (const key of keys) {
+    assert.ok((CAPABILITY_BLOCK_IDS as readonly string[]).includes(key), `key 不在闭集里：${key}`);
+  }
+  // ⚠️ **闭集不多不少** —— 多出来的 key 也是契约破坏。
+  assert.deepEqual([...keys].sort(), [...CAPABILITY_BLOCK_IDS].sort());
+});
+
+test("§10.1: 信封 version 恒为 1；成功带 output + metrics，失败带 error", async () => {
+  const ok = await runOcr(input(["parse"], { path: SOURCE_PATH }, { json: true }));
+  const success = envelopeOf(ok.stdout);
+  assert.equal(success.version, 1);
+  assert.equal(success.ok, true);
+  assert.ok(success.output !== undefined, "成功信封必须带 output");
+  assert.ok(success.metrics !== undefined, "成功信封必须带 metrics");
+
+  const failed = await runOcr(input(["parse"], { path: SOURCE_PATH }, { json: true }), {
+    parse: {
+      ok: false,
+      error: { code: "process_failed", message: "引擎执行失败" },
+      warnings: [],
+      durationMs: 1,
+    },
+  });
+  const failure = envelopeOf(failed.stdout);
+  assert.equal(failure.version, 1);
+  assert.equal(failure.ok, false);
+  assert.ok(failure.error !== undefined, "失败信封必须带 error");
+  assert.equal(failure.output, undefined, "失败信封不得带 output");
+});
+
+test("§10.1: 退出码 130 对应 cancelled", async () => {
+  // ⚠️ **端口的内部码闭集里没有 `cancelled`** ⇒ 取消这一格只能在这一层断言映射
+  // （真被取消时是 CLI 入口收到 SIGINT，不是引擎报的错）。
+  const envelope = buildFailureEnvelope("ocr.parse", {
+    code: "cancelled",
+    message: "用户取消了解析",
+  });
+  assert.equal(exitCodeForEnvelope(envelope), 130);
+  assert.equal(exitCodeForEnvelope(buildSuccessEnvelope("ocr.parse", {})), 0);
+});
+
+test("§10.1: 对外错误码只取 8 个能力码之一，引擎码只出现在 details.engineCode", async () => {
+  const engineCodes: LocalInfraErrorCode[] = [
+    "engine_not_found",
+    "engine_unavailable",
+    "process_failed",
+    "artifact_missing",
+    "timeout",
+    "input_invalid",
+    "password_protected",
+    "document_corrupted",
+    "permission_denied",
+  ];
+
+  for (const engineCode of engineCodes) {
+    const result = await runOcr(input(["parse"], { path: SOURCE_PATH }, { json: true }), {
+      parse: {
+        ok: false,
+        error: { code: engineCode, message: "引擎侧失败" },
+        warnings: [],
+        durationMs: 1,
+      },
+    });
+    const payload = envelopeOf(result.stdout);
+    assert.ok(
+      (CAPABILITY_ERROR_CODES as readonly string[]).includes(payload.error?.code ?? ""),
+      `对外错误码不在闭集里：${payload.error?.code}`,
+    );
+    assert.equal(payload.error?.details?.engineCode, engineCode);
+  }
+});
+
+test("§10.1: 降级不是错误 —— 档位降级后仍是 ok: true + 退出码 0", async () => {
+  const result = await runOcr(
+    input(["parse"], { path: SOURCE_PATH, tier: "advanced" }, { json: true }),
+    {
+      parse: {
+        ...successfulParseResult(),
+        tier: "basic",
+        degradedFrom: "advanced",
+        warnings: ["本机跑不动 advanced，已降级到 basic"],
+      },
+    },
+  );
+
+  assert.equal(result.exitCode, 0, "降级不是错误，退出码必须是 0");
+  const payload = envelopeOf(result.stdout);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.error, undefined);
+  // ⚠️ 降级信息落在 `metrics` 里，不落 `error` 里。
+  assert.equal(payload.metrics?.degradedFrom, "advanced");
+  assert.ok(payload.metrics?.warnings?.some((warning) => warning.includes("降级")));
+});
+
+test("§10.1: 部分页失败也不是错误 —— ok: true + metrics.warnings", async () => {
+  const result = await runOcr(input(["parse"], { path: SOURCE_PATH }, { json: true }), {
+    parse: {
+      ok: true,
+      engine: "mineru",
+      tier: "basic",
+      output: {
+        outputDir: ARTIFACTS_DIR,
+        markdownPath: `${ARTIFACTS_DIR}/report.md`,
+        documentModel: {
+          pages: [
+            {
+              pageIndex: 0,
+              widthPt: 595,
+              heightPt: 842,
+              status: "ok",
+              elements: [{ type: "text", bbox: [0, 0, 1, 1], text: "第一页" }],
+            },
+            {
+              pageIndex: 1,
+              widthPt: 595,
+              heightPt: 842,
+              status: "failed",
+              elements: [],
+            },
+          ],
+          producer: { name: "mineru", version: "4.1.7" },
+        },
+      },
+      warnings: ["第 2 页分析失败，该页没有内容"],
+      durationMs: 12,
+    },
+  });
+
+  assert.equal(result.exitCode, 0);
+  const payload = envelopeOf(result.stdout);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.error, undefined);
+  assert.ok(payload.metrics?.warnings?.some((warning) => warning.includes("第 2 页")));
+});
+
+test("§10.1: 旧信封已消失 —— 顶层没有 engine / tier / warnings / degradedFrom", async () => {
+  const result = await runOcr(input(["parse"], { path: SOURCE_PATH }, { json: true }));
+
+  assert.equal(result.exitCode, 0);
+  const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+  for (const legacy of ["engine", "tier", "warnings", "degradedFrom"]) {
+    assert.equal(legacy in payload, false, `顶层不该再有 ${legacy}`);
+  }
+  // ⚠️ `engine` / `tier` 移进 `output`，`warnings` / `degradedFrom` 进 `metrics`。
+  const output = payload.output as Record<string, unknown>;
+  assert.equal(output.engine, "mineru");
+  assert.equal(output.tier, "basic");
+  const metrics = payload.metrics as Record<string, unknown>;
+  assert.ok(Array.isArray(metrics.warnings));
+});
+
+test("§10.1: 失败时 stderr 没有错误行（错误只在 stdout 的信封里）", async () => {
+  const result = await runOcr(input(["parse"], { path: SOURCE_PATH }, { json: true }), {
+    parse: {
+      ok: false,
+      error: { code: "process_failed", message: "引擎执行失败（退出码 3）" },
+      warnings: [],
+      durationMs: 1,
+    },
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.ok(!result.stderr.includes("引擎执行失败"), "错误行不得出现在 stderr");
+  // stderr 逐行仍是合法进度事件 ⇒ 业务可以无脑逐行 JSON.parse。
+  const lines = result.stderr.split("\n").filter((line) => line.trim() !== "");
+  for (const line of lines) {
+    const event = JSON.parse(line) as { type?: string };
+    assert.equal(event.type, "progress");
+  }
+});
+
+test("§10.1: parse 的产物面有 artifacts.markdownPath，inspect 没有 artifacts", async () => {
+  const parse = await runOcr(input(["parse"], { path: SOURCE_PATH }, { json: true }));
+  const parseOutput = envelopeOf(parse.stdout).output as Record<string, unknown>;
+  const artifacts = parseOutput.artifacts as Record<string, string>;
+  assert.equal(artifacts.markdownPath, "report.md");
+
+  const inspect = await runOcr(input(["inspect"], { path: SOURCE_PATH }, { json: true }));
+  const inspectOutput = envelopeOf(inspect.stdout).output as Record<string, unknown>;
+  assert.equal("artifacts" in inspectOutput, false, "inspect 不产出 markdown，不该有 artifacts");
+});
+
+test("§10.3: 引擎不可用 ⇒ unavailable + hint 给装法", async () => {
+  const result = await runOcr(input(["parse"], { path: SOURCE_PATH }, { json: true }), {
+    parse: {
+      ok: false,
+      error: {
+        code: "engine_unavailable",
+        message: "未找到 mineru-kit 可执行文件",
+        hint: '安装：uv tool install --python 3.12 "mineru>=4.0,<5"',
+        details: { engineCode: "engine_unavailable" },
+      },
+      warnings: [],
+      durationMs: 1,
+    },
+  });
+
+  assert.equal(result.exitCode, 1);
+  const payload = envelopeOf(result.stdout);
+  assert.equal(payload.error?.code, "unavailable");
+  assert.match(String(payload.error?.hint), /uv tool install/u);
+  assert.equal(payload.error?.details?.engineCode, "engine_unavailable");
+});
+
+test("§10.3: doctor 是只读面 —— 不下载权重、不写任何产物", async () => {
+  const result = await runOcr(input(["doctor"], {}, { json: true }));
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stub.downloadCalls.length, 0, "doctor 不得触发权重下载");
+  assert.equal(result.fileSystem.writes.length, 0, "doctor 不得写任何产物");
+});
+
+test("§10.3: 自包含 —— 四个积木各自单独调用即完成一件事", async () => {
+  const blocks: ReadonlyArray<{ readonly name: string; readonly command: OcrCommandInput }> = [
+    { name: "doctor", command: input(["doctor"], {}, { json: true }) },
+    { name: "inspect", command: input(["inspect"], { path: SOURCE_PATH }, { json: true }) },
+    { name: "parse", command: input(["parse"], { path: SOURCE_PATH }, { json: true }) },
+    {
+      name: "models download",
+      command: input(["models", "download"], { tier: "basic" }, { json: true }),
+    },
+  ];
+
+  for (const block of blocks) {
+    const result = await runOcr(block.command);
+    assert.equal(result.exitCode, 0, `${block.name} 单独调用应当成功`);
+    const payload = envelopeOf(result.stdout);
+    assert.equal(payload.ok, true, `${block.name} 应当是成功信封`);
+    assert.ok(payload.output !== undefined, `${block.name} 应当带完整 output`);
+  }
+});
+
+test("§10.3: 并发 —— 两个积木并发跑，互不阻塞也不互相污染产物", async () => {
+  const otherPath = "/tmp/work/other.pdf";
+  const otherSidecarPath = `${otherPath}.zcode-ocr.json`;
+  const fileSystem = new MemoryFileSystem();
+  fileSystem.files.set(SOURCE_PATH, "PDF-A");
+  fileSystem.files.set(otherPath, "PDF-B");
+  const stub = perPathStubPort();
+
+  const [first, second] = await Promise.all([
+    runOcr(input(["parse"], { path: SOURCE_PATH }, { json: true }), { fileSystem, stub }),
+    runOcr(input(["inspect"], { path: otherPath }, { json: true }), { fileSystem, stub }),
+  ]);
+
+  assert.equal(first.exitCode, 0);
+  assert.equal(second.exitCode, 0);
+  assert.equal(stub.parseCalls.length, 2, "两个积木各自跑了自己的引擎");
+  // ⚠️ **各自的 sidecar 互不覆盖** —— 产物不互相污染。
+  assert.equal(envelopeOf(first.stdout).output?.sidecarPath, SIDECAR_PATH);
+  assert.equal(envelopeOf(second.stdout).output?.sidecarPath, otherSidecarPath);
+  const written = fileSystem.writes
+    .filter((write) => write.path.endsWith(".zcode-ocr.json"))
+    .map((write) => write.path);
+  assert.deepEqual(written.sort(), [SIDECAR_PATH, otherSidecarPath].sort());
+});
+
+test("§10.2: imagePath 按 §6.2 的基准解析后指向的文件真实存在", async () => {
+  const fileSystem = fileSystemWithSource();
+  // 引擎产物：图片落在产物目录里（相对 artifactsDir 的 `images/p0.jpg`）。
+  fileSystem.files.set(`${ARTIFACTS_DIR}/images/p0.jpg`, "JPEG-BYTES");
+
+  const result = await runOcr(input(["inspect"], { path: SOURCE_PATH }, { json: true }));
+
+  assert.equal(result.exitCode, 0);
+  const output = envelopeOf(result.stdout).output as {
+    sidecarPath: string;
+    artifactsDir: string;
+    pages: { elements: { imagePath?: string }[] }[];
+  };
+  const imagePath = output.pages[0]?.elements[1]?.imagePath;
+  assert.equal(imagePath, "images/p0.jpg");
+  // ⚠️ 基准：`artifactsDir` 相对 sidecar 所在目录，`imagePath` 相对 `artifactsDir`。
+  const resolved = join(dirname(output.sidecarPath), output.artifactsDir, imagePath ?? "");
+  assert.ok(fileSystem.files.has(resolved), `图片解析后不存在：${resolved}`);
 });
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { LocalDocumentElement, LocalDocumentPage, OcrSidecar } from "@zcode/contracts";
-import { OCR_SIDECAR_VERSION } from "@zcode/contracts";
+import type {
+  LocalDocumentElement,
+  LocalDocumentPage,
+  LocalInfraErrorCode,
+  OcrSidecar,
+} from "@zcode/contracts";
+import { CAPABILITY_ERROR_CODES, OCR_SIDECAR_VERSION } from "@zcode/contracts";
 import {
   buildFailureEnvelope,
   buildOcrSidecar,
@@ -406,5 +411,150 @@ describe("退出码（spec §5.2）", () => {
     expect(exitCodeForCapabilityError("unsupported_input")).toBe(1);
     expect(exitCodeForCapabilityError("permission_denied")).toBe(1);
     expect(exitCodeForCapabilityError("internal")).toBe(1);
+  });
+});
+
+describe("错误码闭集（spec §10.1）", () => {
+  it("对外错误码恰好 8 个，没有第 9 个", () => {
+    expect(CAPABILITY_ERROR_CODES).toHaveLength(8);
+    expect(new Set(CAPABILITY_ERROR_CODES).size).toBe(8);
+    expect([...CAPABILITY_ERROR_CODES].sort()).toEqual([
+      "cancelled",
+      "internal",
+      "invalid_input",
+      "not_found",
+      "permission_denied",
+      "timeout",
+      "unavailable",
+      "unsupported_input",
+    ]);
+  });
+
+  it("每个引擎内部码的归一结果都落在闭集内（闭集外一律是契约破坏）", () => {
+    const engineCodes: LocalInfraErrorCode[] = [
+      "engine_not_found",
+      "engine_unavailable",
+      "process_failed",
+      "artifact_missing",
+      "timeout",
+      "input_invalid",
+      "password_protected",
+      "document_corrupted",
+      "permission_denied",
+    ];
+
+    for (const engineCode of engineCodes) {
+      const normalized = normalizeLocalInfraError({ code: engineCode, message: "m" });
+      expect(CAPABILITY_ERROR_CODES).toContain(normalized.code);
+      // ⚠️ 引擎码只出现在 `details.engineCode`（业务按能力码分支，运维按内部码定位）。
+      expect(normalized.details?.engineCode).toBe(engineCode);
+    }
+  });
+});
+
+describe("sidecar 的位置与格式（spec §6.2 / §10.2）", () => {
+  it("数字版空白页 ⇒ status: ok + composition: empty（不是 failed）", () => {
+    // ⚠️ **失败页 ≠ 空白页**：分析出错的页是 failed + composition null；
+    // 数字版 PDF 原生分析不出元素是 ok + empty（spec §10.2）。
+    const built = buildOcrSidecar({
+      source: { path: "a.pdf", sha256: "abc", bytes: 10, mtimeMs: 1 },
+      engine: {
+        name: "pdf-native",
+        variant: "pdf-native",
+        version: "26.09.0",
+        tier: "native",
+        route: "pdf-native",
+        assets: {},
+      },
+      artifactsDir: "out",
+      pages: [page([])],
+    });
+
+    expect(built.pages[0]?.status).toBe("ok");
+    expect(built.pages[0]?.composition).toBe("empty");
+    expect(built.pages[0]?.elements).toEqual([]);
+  });
+
+  it("bbox 是归一化四元组，分母是页级 widthPt / heightPt（逐页对应）", () => {
+    const built = buildOcrSidecar({
+      source: { path: "a.pdf", sha256: "abc", bytes: 10, mtimeMs: 1 },
+      engine: {
+        name: "mineru",
+        variant: "mineru",
+        version: "4.1.7",
+        tier: "basic",
+        route: "mineru",
+        assets: {},
+      },
+      artifactsDir: "out",
+      pages: [
+        {
+          pageIndex: 0,
+          widthPt: 595,
+          heightPt: 842,
+          status: "ok",
+          elements: [element("text", { bbox: [0.1, 0.2, 0.3, 0.4], text: "x" })],
+        },
+        {
+          pageIndex: 1,
+          widthPt: 1190,
+          heightPt: 842,
+          status: "ok",
+          elements: [element("text", { bbox: [0.05, 0.05, 0.95, 0.09], text: "y" })],
+        },
+      ],
+    });
+
+    // ⚠️ **分母是页级的**（不是整份文档共用一个）⇒ 两页的尺寸各自独立。
+    expect(built.pages[0]?.widthPt).toBe(595);
+    expect(built.pages[1]?.widthPt).toBe(1190);
+    expect(built.pages[0]?.elements[0]?.bbox).toEqual([0.1, 0.2, 0.3, 0.4]);
+    expect(built.pages[1]?.elements[0]?.bbox).toEqual([0.05, 0.05, 0.95, 0.09]);
+  });
+
+  it("扫描页的整页图保留 origin: rendered 与 bbox [0,0,1,1]", () => {
+    const built = buildOcrSidecar({
+      source: { path: "a.pdf", sha256: "abc", bytes: 10, mtimeMs: 1 },
+      engine: {
+        name: "mineru",
+        variant: "mineru",
+        version: "4.1.7",
+        tier: "basic",
+        route: "mineru",
+        assets: {},
+      },
+      artifactsDir: "out",
+      pages: [
+        page([element("image", { origin: "rendered", bbox: [0, 0, 1, 1], imagePath: "page.png" })]),
+      ],
+    });
+
+    expect(built.pages[0]?.elements[0]?.origin).toBe("rendered");
+    expect(built.pages[0]?.elements[0]?.bbox).toEqual([0, 0, 1, 1]);
+    expect(built.pages[0]?.elements[0]?.imagePath).toBe("page.png");
+  });
+
+  it("格式稳定 —— sidecar 里不出现 MinerU 专有键，元素 type 保持开放字符串", () => {
+    const built = buildOcrSidecar({
+      source: { path: "a.pdf", sha256: "abc", bytes: 10, mtimeMs: 1 },
+      engine: {
+        name: "mineru",
+        variant: "mineru",
+        version: "4.1.7",
+        tier: "basic",
+        route: "mineru",
+        assets: {},
+      },
+      artifactsDir: "out",
+      pages: [page([element("equation", { text: "E=mc^2" })])],
+    });
+
+    // ⚠️ **引擎专有键不许漏进统一格式**（`extensions.mineru` / `docvortex_layout`）。
+    const serialized = JSON.stringify(built);
+    expect(serialized).not.toContain("extensions");
+    expect(serialized).not.toContain("docvortex_layout");
+    // ⚠️ `type` 是开放字符串 —— 新类型名原样保留，分类归到 other。
+    expect(built.pages[0]?.elements[0]?.type).toBe("equation");
+    expect(built.pages[0]?.elements[0]?.category).toBe("other");
   });
 });

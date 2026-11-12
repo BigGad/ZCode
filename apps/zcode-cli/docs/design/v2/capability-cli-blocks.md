@@ -1,6 +1,6 @@
 # 能力积木 CLI（业务侧积木模型）
 
-Status: **规划稿 v2.3**（2026-11-12）：形态已与用户对齐定稿；**步 0–7 已实施**（统一信封 + 错误码闭集、`zcode ocr` 的信封迁移与 stderr 分流、sidecar v3 与缓存接力、`zcode ocr inspect` 积木、`zcode ocr parse` 的产物补齐、旧 spec 口径同步、业务接入说明）；**`--pdf-password` 的加密 PDF 路线已落地**（v2.2）；**数字版 PDF 的原生分析路线已定案并落地**（v2.3，O1 的答案 = poppler `pdftohtml -xml`）。
+Status: **规划稿 v2.4**（2026-11-12）：形态已与用户对齐定稿；**步 0–7 已实施**（统一信封 + 错误码闭集、`zcode ocr` 的信封迁移与 stderr 分流、sidecar v3 与缓存接力、`zcode ocr inspect` 积木、`zcode ocr parse` 的产物补齐、旧 spec 口径同步、业务接入说明）；**`--pdf-password` 的加密 PDF 路线已落地**（v2.2）；**数字版 PDF 的原生分析路线已定案并落地**（v2.3，O1 的答案 = poppler `pdftohtml -xml`）；**§10 验收表已全表回归**（v2.4，落点见 §10.4）。
 ⚠️ **业务接入说明见 [`capability-cli-blocks-onboarding.md`](./capability-cli-blocks-onboarding.md)**（族内动词表 + 前置依赖 + 积木之间的常见组合 + 常见坑）。
 ⚠️ 本 spec **推翻** [`capability-registry.md`](./capability-registry.md) §4.2 的「统一执行面 `zcode cap run` + 不新增子命令路由到每个能力」，并**修订** [`ocr-local.md`](./ocr-local.md) §6.1 / §6.1.1（sidecar 格式）与 §6.5（交付形态）。冲突处以本 spec 为准。
 
@@ -221,6 +221,9 @@ zcode 一侧只保证三件事：
 | `timeout` | `timeout` | `124` |
 
 ⚠️ **对外只有这一个错误码闭集**（8 个）。引擎层 / 资产层的细粒度码**一律归一**，原始码放 `details.engineCode` / `details.assetCode`。
+
+⚠️ **`cancelled` 的可达性（v2.4 实测）**：引擎层的内部码闭集（`LocalInfraErrorCode`）里**没有** `cancelled` ⇒ **端口报错走不到 `130`**。当前 `130` 只有两条路：① CLI 入口收到 SIGINT（进程层）；② 调用方直接构造 `cancelled` 信封。
+⚠️ **本 spec 不为此新增端口码**（不为「凑齐退出码表」加兜底分支）—— 将来若要支持「用户取消解析」，须先在 `LocalInfraErrorCode` 加码并在本表补一行。
 
 ### 5.3 版本
 
@@ -672,6 +675,19 @@ pdftohtml -xml -zoom 1 -noroundcoord -hidden -nodrm -q [-upw <密码>] <pdf> <�
 | §10.3 边界（并发、只读、红线） | `@zcode/core` + `@zcode/cli` 的 `tests/`（引擎端口用假实现，断言 argv） | 同上 |
 | **真引擎相关**（识别质量、真实 bbox、真实档位） | ❌ **不进 CI** | 端到端手测（需要装好引擎 + 权重） |
 
+✅ **v2.4 的实际落点**（验收表逐行对应的文件）：
+
+| 断言组 | 文件 |
+| --- | --- |
+| §10.1 契约（信封形状 / `key` 闭集 / 退出码 / 错误码闭集 / 降级不是错误 / 旧信封已消失 / 进度通道 / 运维面单列） | `@zcode/cli` 的 `tests/ocr-command.test.ts`（⚠️ **已登记进 `packages/cli/package.json` 的 `scripts.test`**） |
+| §10.2 纯函数（错误码闭集 / 分类映射 / 命中判据 / 数字版空白页 / 位置 / 格式稳定） | `@zcode/core` 的 `tests/capability-ocr-sidecar.test.ts` |
+| §10.2 原子写 + 路径解析 | `@zcode/cli` 的 `tests/ocr-sidecar-store.test.ts`（指纹 / 路径基准 / 坏缓存当没有缓存；⚠️ **已登记进 `scripts.test`**）+ `@zcode/adapters` 的 `tests/ocr-sidecar-atomic.test.ts`（⚠️ **并发读者的可见性在 fs 适配器这一层验** —— 命令面只负责把 `atomic: true` 传下去） |
+| §10.3 边界（自包含 / 并发 / 只读面 / 引擎不可用） | `@zcode/cli` 的 `tests/ocr-command.test.ts` |
+| §10.3 远端旗标红线 | `@zcode/adapters` 的 `tests/local-infra/local-infra.test.ts`（已存在） |
+| §10.2 / §6.7 原生分析路线与路线判定 | `@zcode/adapters` 的 `tests/local-infra/analyze-route.test.ts` + `tests/pdf-layout.test.ts`（已存在） |
+
+⚠️ **`cancelled`（退出码 `130`）只在信封映射层断言**（见 §5.2 的可达性说明）—— 端口的内部码闭集里没有它。
+
 ## 11. 实施顺序
 
 | 步 | 内容 | 前置 | 状态 |
@@ -723,3 +739,4 @@ pdftohtml -xml -zoom 1 -noroundcoord -hidden -nodrm -q [-upw <密码>] <pdf> <�
 | **v2.1** | **2026-11-12** | **实施步 0–3 后的回写**：① 状态行改为「步 0–3 已实施，步 4 待 O1」；② §5.7 补 `ocr.parse` 的 `output` 形状定稿（`cached` / `sidecarPath` / `artifactsDir` / `artifacts`）；③ §4.1 / §6.2 的默认产物目录名订正为 `<源文件名>.mineru/`（**含扩展名**，与 `local-infra.md` §7.3 一致；原写的「去扩展名」是笔误）；④ §4.1 / §4.2 标注 `--force` / `--pdf-password` 已实施；⑤ §5.6 标注进度通道已实施；⑥ §11 步 0 清单订正为**实际登记的两个模块** + bootstrap 装配随 O4；⑦ §11 表加「状态」列。⚠️ **验收覆盖**：§10.1 全表 ⇒ `@zcode/cli` 的 `tests/ocr-command.test.ts`；§10.2 的分类 / 映射表 / 命中判据 / 接力（**parse → parse**）/ 指纹失效 / `--force` ⇒ `@zcode/core` 的 `tests/capability-ocr-sidecar.test.ts`；MinerU 产物 → 元素模型的提取 ⇒ `@zcode/adapters` 的 `tests/local-infra/document-model.test.ts`。**`inspect` 相关的接力行待步 4** |
 | **v2.2** | **2026-11-12** | **加密 PDF 路线落地 + v2.1 失实表述订正**：① ⚠️ **v2.1 说「`--pdf-password` 已实施、hint 与行为对得上」是错的** —— 实测 MinerU 4.1.7 **没有任何密码入口**（`mineru-kit parse <加密.pdf>` 报 `Failed to load document (PDFium: Incorrect password error).`；`mineru-kit parse --help` 无 `--password`；`mineru.parser.parse()` 与 `docvortex.document.pdf.PDFDocument.__init__` 无密码参数）⇒ 密码原先只到得了 poppler 的页数探测，**flag 被接受但对解析没有作用**；② 新路线：**端口在调引擎前探加密状态** —— 未给密码 ⇒ 直接报 `password_protected`（对外 `invalid_input`，hint 指向 `--pdf-password`），**不空跑一次引擎**；给了密码 ⇒ 先用 poppler `pdftocairo -pdf -upw/-opw` 解出**临时无密副本**再交给引擎，解析完即删（原文件不动、指纹仍取原文件）；③ 端口没有 poppler 时走兜底：引擎 stderr 里的 `Incorrect password` 同样归一成 `password_protected`；④ 契约层加 `LocalInfraErrorCode.password_protected` 与 `PdfDocumentPort.decryptToFile`；⑤ §4.3 前置依赖补「加密 PDF 需要 poppler 的 `pdftocairo`」；⑥ ⚠️ **修一个实测暴露的接线 bug**：`--pdf-password` 注册在**全局**旗标表，`run.ts` 的「只服务无头链路」作用域检查会把 `zcode ocr` 一起拦掉（症状：`--pdf-password can only be used with --prompt or --target.`）⇒ `zcode ocr` 命令组豁免该检查（回归见 `packages/cli/tests/pdf-password.test.ts`）。⚠️ **实测留痕**：同一份 PDF 的原文与解密副本分别过 MinerU，**元素模型逐项一致**（块类型 / bbox / `image_source` 全同）⇒ cairo 重编码对 OCR 产物无可见影响（实测结论，非保证）。路线细节见 [`ocr-local.md`](./ocr-local.md) §3.2.1 |
 | **v2.3** | **2026-11-12** | **O1 定案 + 步 4–5 落地。** ① **O1 的答案**：数字版 PDF 的原生分析走 **poppler 的 `pdftohtml -xml`** —— 一次调用同时给**页尺寸（pt）/ 文本块 bbox + 文本 / 内嵌图片 bbox**（并把图片抽成 PNG 落在产物目录），实测见 §6.7；② 新增 §6.7「原生分析路线的实现」与 §5.8「`ocr.inspect` 的 `output` 形状」；③ **路线自决**：每一页都有文本层 ⇒ 原生路线；有一页没有 ⇒ 整份文档走识别路线（宁可多算，不可漏页）；poppler 不可用 ⇒ 识别路线 + **一条明确的 warning**（不静默）；④ **原生路线没有质量档位**（`engine.tier = "native"`）⇒ §6.5 缓存判据 3 对它**不适用**（否则数字版 PDF 每次都「档位不符 ⇒ 重算」，缓存形同虚设）；⑤ **扫描页**补一张覆盖整页的 image 元素（`bbox = [0,0,1,1]`、`origin: "rendered"`）；⑥ **markdown 来源规则**：识别路线复用引擎的 markdown，原生路线按 §6.5 派生 `<artifactsDir>/markdown.md` 并回填 sidecar 的 `text.markdownPath`；⑦ §4.3 补 **poppler 是第三类依赖**与三个 poppler 二进制各管一段；⑧ §10 补 v2.3 的验收行（`inspect` 不返回正文 / 两条积木的产物面 / 原生路线 / 路线判定）；⑨ **步 6**：旧 spec 口径同步（`local-infra.md` §5.4 / §7.3 / §7.5 / M8、`ocr-local.md` §3.3 横幅）；⑩ **步 7**：业务接入说明落成 [`capability-cli-blocks-onboarding.md`](./capability-cli-blocks-onboarding.md) |
+| **v2.4** | **2026-11-12** | **验收回归落地（§10 全表）。** ① `@zcode/cli` 的 `tests/ocr-command.test.ts` 补齐 §10.1 / §10.3 的缺口：`key` **闭集**（四个积木各跑一次，闭集不多不少）、`version` 恒为 `1`、**错误码闭集**（九个引擎内部码逐个注入 ⇒ 对外码必落在 8 个闭集内，引擎码只在 `details.engineCode`）、**降级不是错误**（`ok: true` + `metrics.degradedFrom` + 退出码 `0`）、**部分页失败也不是错误**、**旧信封已消失**（顶层无 `engine` / `tier` / `warnings` / `degradedFrom`）、失败时 **stderr 无错误行**、两条积木的产物面、**引擎不可用 ⇒ `unavailable` + hint**、**doctor 只读面**、**自包含**、**并发不互相污染产物**、`imagePath` 按 §6.2 基准解析后真实存在；② 新增 `@zcode/cli` 的 `tests/ocr-sidecar-store.test.ts`（**内容指纹 / 路径基准 / 原子写请求 / 坏缓存当没有缓存** ⇒ ⚠️ **已登记进 `packages/cli/package.json` 的 `scripts.test`**，否则不会被跑到）；③ 新增 `@zcode/adapters` 的 `tests/ocr-sidecar-atomic.test.ts`（**并发读者永远读到完整 JSON** + **三个路径基准解析后文件真实存在**）；④ `@zcode/core` 的 `tests/capability-ocr-sidecar.test.ts` 补：错误码闭集**恰好 8 个**、**数字版空白页**（`ok` + `empty`）、**位置与页级尺寸一一对应**、**扫描页整页图**、**格式稳定**（无 MinerU 专有键）；⑤ §5.2 补 **`cancelled` 的可达性**说明（端口内部码闭集里没有它 ⇒ `130` 只在信封映射层可达），§10.4 补**逐行落点表** |
