@@ -168,6 +168,10 @@ export interface OcrCapabilityInput {
 
 ### 3.3 输出按引擎分流
 
+> ⚠️ **2026-11-12 修订**：本节的 `pageWidthPt` / `pageHeightPt`（**整份文档共用**的分母）与「sidecar v2 变体」的说法**已过期** —— 统一 sidecar v3 把分母改成**页级** `widthPt` / `heightPt`（分母跟着页走，不再是整份文档共用），且 v2 已废止（见 §6.1 / §6.1.1 的作废横幅与 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §6.3 的映射表）。
+> ⇒ **实现时不得按本节的字段名建模**：以 §6.1 的 v3 口径为准。
+> ⇒ 本节其余内容（按引擎分流、`tier` / `degradedFrom` 的对外落点、块级 `type` 是开放集合）**继续有效**。
+
 ```ts
 export type OcrCapabilityOutput =
   | {

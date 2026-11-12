@@ -14,6 +14,8 @@ zcode hooks trust status --workspace /absolute/path/to/project --json
 
 无参数进入 TUI。`--prompt`/`-p` 必须带非空文本；不要把 `-p` 当作无需值的开关，也不要用裸位置参数替代 prompt。`app-server` 是协议服务入口，不是批量任务的普通问答命令。
 
+⚠️ **本地 OCR / 文档解析**走 `zcode ocr` 命令组（`doctor` / `inspect` / `parse` / `models download`），是给业务侧当积木调的原子命令，契约与接入说明见[能力积木 · 业务接入说明](../design/v2/capability-cli-blocks-onboarding.md)。
+
 ## 参数
 
 - `--cwd <path>`：本次调用的有效工作目录，用于项目配置、技能发现和会话归属。

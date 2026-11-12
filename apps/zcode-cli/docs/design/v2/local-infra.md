@@ -88,7 +88,7 @@ Status: **v1 已实现**（2026-11-09）：端口 + 命令面 + 回归测试已�
 | M5 | ⚠️ **已修订（2026-11-11）**：交付形态 = **`zcode` 的子命令组**，**不需要第二个 bin** ⇒ 发行链（`build-zcode.mjs` → `zcode-distribution`）、SEA、Electron 桌面**零改动**（原决策：发行包里的第二个命令，SEA / 桌面不提供） | 子命令组复用同一个入口 ⇒ 既省掉"第二个 bin 要改 4 处"的成本，又让 SEA / 桌面**自动具备**该命令 |
 | M6 | MinerU 路径下，tesseract 专属参数（`psm` / `preprocess` / `thresholdingMethod` / `noWords`）**明确拒绝**，不静默忽略 | 契约说谎比报错更糟 |
 | M7 | 端口类型放 `packages/contracts`（纯 TS 接口，**不引 zod**）；实现放 `packages/adapters` | ⚠️ zod 纪律约束的是 `CapabilityDefinition.inputSchema/outputSchema`，**不约束 port 接口**（`execution.port.ts` / `file-system.port.ts` 零 zod 依赖）。真正会被 zod 3 咬到的是 §7.10 要改的 `OcrCapabilityInput/Output` |
-| M8 | `zcode ocr` 有 `doctor` / `parse` / `models` 三个子命令（**无 `server` 组**）；**`asset` 是平级的独立命令组 `zcode asset`**，不挂在 `zcode ocr` 底下 | 无状态路线没有要管理的服务；CLI 原子化 ⇒ 资产（跨能力域共享）不归任何一个能力域 |
+| M8 | `zcode ocr` 有 `doctor` / `inspect` / `parse` / `models` **四个**子命令（⚠️ **2026-11-12 新增 `inspect`**，形态见 [`capability-cli-blocks.md`](./capability-cli-blocks.md)；**无 `server` 组**）；**`asset` 是平级的独立命令组 `zcode asset`**，不挂在 `zcode ocr` 底下 | 无状态路线没有要管理的服务；CLI 原子化 ⇒ 资产（跨能力域共享）不归任何一个能力域 |
 | M9 | 产物用 **`--format zip` 一次取全**，再解包出 `markdown.md` / `middle_json.json` / `structured_content.json` | 分两次跑要**付两次冷启动**（实测冷启动 123.5s） |
 | M10 | 档位可用性判据用 **`mineru-kit hardware detect --json`** | 无状态路线没有 server 的 `supported_tiers` 可用 |
 | M11 | 档位链 = **`advanced → standard → basic → flash`**（官方枚举的完整四档），但**集合动态取自 `pdf_image_tiers`**，不硬编码 | 实测 `pdf_image_tiers: ["flash","basic","standard","advanced"]`，`flash` 官方文档从未出现过 |
@@ -259,8 +259,9 @@ mineru-advanced  →  mineru-standard  →  mineru-basic  →  mineru-flash
 | 面 | 形态 |
 | --- | --- |
 | `zcode ocr doctor --json` | 环境体检：可执行文件定位、**硬件与档位**（`ceiling` / `pdf_image_tiers` / `default_request_tier` / `device` / `calibration`）、**模型就绪情况**、缺失项与装法 |
-| `zcode ocr parse --json` | `{ ok, engine?, tier?, degradedFrom?, output?, error?, warnings[], durationMs }`（样例见 §7.5） |
-| 能力信封（v1 不接） | `output` + `metrics.warnings[]`；失败走 `error.code` / `error.hint` / `error.details.engineCode` |
+| `zcode ocr parse --json` | ⚠️ **2026-11-12 起是统一信封**（[`capability-cli-blocks.md`](./capability-cli-blocks.md) §5）：`{ version, key: "ocr.parse", ok, output?, error?, metrics? }`（样例见 §7.5） |
+| `zcode ocr inspect --json` | 同一套信封，`key: "ocr.inspect"`（**不含** `artifacts` / 逐元素正文） |
+| 能力信封 | `output` + `metrics.warnings[]` / `metrics.durationMs` / `metrics.degradedFrom?`；失败走 `error.code` / `error.hint` / `error.details.engineCode`；**顶层不再有 `engine` / `tier` / `warnings` / `degradedFrom`** |
 
 ⚠️ **就绪是三层的**（实测得出）：「装了 MinerU」≠「能解析」。
 
@@ -609,11 +610,16 @@ apps/zcode-cli/packages/cli  ←  CLI 外壳：zcode ocr
 
 ```
 zcode ocr doctor [--json]
-zcode ocr parse --path <file> [--output <dir>] [--tier <tier>] [--json]
+zcode ocr inspect --path <file> [--output <dir>] [--force] [--pdf-password <密码>] [--json]
+zcode ocr parse --path <file> [--output <dir>] [--tier <tier>] [--force] [--pdf-password <密码>] [--json]
 zcode ocr models download --tier <basic|standard> [--source <auto|huggingface|modelscope>] [--json]
 ```
 
-⚠️ **`models download` 是 v1 的第三个子命令** —— §7.9 的代理策略与 §7.7 的 `ocr.mineruProxy` 旋钮都预设了"ZCode 会 spawn `mineru-kit models download`"这件事：若没有这个命令，那两处规则就悬空（配置键没有消费方）。⚠️ **MinerU 的 `models download --tier` 只接受 `basic` / `standard`**（实测 `mineru-kit models download --help`），其它档位命令面直接拒绝并给出可用值。
+⚠️ **`inspect` 是 2026-11-12 新增的积木**（形态见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §4 / §6.7）：只出**页成分 + 元素位置**，**不返回正文**、**没有 `--tier`**（档位是识别路线的概念，数字版 PDF 走原生分析路线压根不烧权重）。
+
+⚠️ **`--force`**：忽略 sidecar 缓存强制重算并覆盖（接力与缓存判据见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §6.5）。⚠️ **`--pdf-password`**：加密 PDF 的密码，**只经 argv 传给子进程，不落盘、不入日志**（路线见 [`ocr-local.md`](./ocr-local.md) §3.2.1）。
+
+⚠️ **`models download` 是 v1 的第四个子命令** —— §7.9 的代理策略与 §7.7 的 `ocr.mineruProxy` 旋钮都预设了"ZCode 会 spawn `mineru-kit models download`"这件事：若没有这个命令，那两处规则就悬空（配置键没有消费方）。⚠️ **MinerU 的 `models download --tier` 只接受 `basic` / `standard`**（实测 `mineru-kit models download --help`），其它档位命令面直接拒绝并给出可用值。
 
 #### ⚠️ CLI 原子化：命令面按能力域切分（2026-11-11 用户定）
 
@@ -632,11 +638,16 @@ zcode ocr models download --tier <basic|standard> [--source <auto|huggingface|mo
 
 ⚠️ **2026-11-12 新增**：命令组与子命令的**业务接入形态**（积木模型、统一信封、sidecar 接力、`inspect` 子命令、`--force`）由 [`capability-cli-blocks.md`](./capability-cli-blocks.md) 定义 —— 本 spec 只管**引擎 / 档位 / 产物**这一侧。该 spec 同时推翻了 `capability-registry.md` §4.2 的 `zcode cap run` 通用执行面。
 
-#### ⚠️ 旗标：`--path` / `--output` / `--tier` / `--source` 注册在 `zcode` 全局旗标表
+#### ⚠️ 旗标：`--path` / `--output` / `--tier` / `--source` / `--force` / `--pdf-password` 注册在 `zcode` 全局旗标表
 
-`zcode` 的全局解析器是 `strict: true`（`packages/cli/src/arguments.ts`），**子命令的私有旗标必须在全局表注册**，否则 `zcode ocr parse --path x.pdf` 会在进分派表之前就报"未知参数"。⇒ 这四个旗标在全局表注册，**命令组只做"哪个子命令收哪些旗标"的组合校验**（例如 `doctor` 不接受 `--path`）。
+`zcode` 的全局解析器是 `strict: true`（`packages/cli/src/arguments.ts`），**子命令的私有旗标必须在全局表注册**，否则 `zcode ocr parse --path x.pdf` 会在进分派表之前就报"未知参数"。⇒ 这**六个**旗标都在全局表注册，**命令组只做"哪个子命令收哪些旗标"的组合校验**（例如 `doctor` 不接受 `--path`，`inspect` 不接受 `--tier`）。
 
-⚠️ 这四个名字**跨能力域语义一致**（`--path` = 输入文件、`--output` = 产物目录、`--tier` = 档位、`--source` = 模型源）⇒ 将来 `zcode llm` / `zcode asr` 复用同一组旗标，不另起名字。
+⚠️ **六个旗标的来源分两类**（2026-11-12 核对）：
+
+| 旗标 | 来源 | 备注 |
+| --- | --- | --- |
+| `--path` / `--output` / `--tier` / `--source` | 2026-11-11 为本命令组注册 | 语义**跨能力域一致**（`--path` = 输入文件、`--output` = 产物目录、`--tier` = 档位、`--source` = 模型源）⇒ 将来 `zcode llm` / `zcode asr` 复用同一组旗标，不另起名字 |
+| `--force` / `--pdf-password` | **本来就在全局表**（`--force` 供已有命令用；`--pdf-password` 是无头模式下密码 PDF 的非交互来源） | ⚠️ **不是本命令组新增的全局旗标**，但在本组里换了语义：`--force` = 忽略 sidecar 缓存重算；`--pdf-password` = 传 PDF 密码（**argv only**） |
 
 ⚠️ **`-p` 仍被 `--prompt` 占用** ⇒ OCR 命令组**只用长名旗标**，不引入短名（沿用 M14）。
 
@@ -792,23 +803,33 @@ export interface LocalParseResult {
 ```jsonc
 // 成功
 {
+  "version": 1,
+  "key": "ocr.parse",                                   // ⚠️ 积木 id（不是能力键 `ocr`）
   "ok": true,
-  "engine": "mineru",
-  "tier": "basic",                 // ⚠️ 从产物的 extensions.mineru.tier 回填
-  "degradedFrom": "advanced",      // 发生过降级时才有
   "output": {
-    "outputDir": "/work/扫描件.pdf.mineru",
-    "markdownPath": "/work/扫描件.pdf.mineru/markdown.md",
-    "structuredContentPath": "/work/扫描件.pdf.mineru/structured_content.json",
-    "middleJsonPath": "/work/扫描件.pdf.mineru/middle_json.json",
-    "assetsDir": "/work/扫描件.pdf.mineru/images"      // ⚠️ 有裁剪图时才有
+    "cached": false,                                    // ⚠️ true = 命中 sidecar 缓存，未重跑引擎
+    "sidecarPath": "/work/扫描件.pdf.zcode-ocr.json",
+    "artifactsDir": "扫描件.pdf.mineru",                // ⚠️ 相对 sidecar 所在目录
+    "engine": "mineru",                                 // ⚠️ 原生分析路线时是 "pdf-native"
+    "tier": "basic",                                    // ⚠️ 从产物的 extensions.mineru.tier 回填；原生路线是 "native"
+    "artifacts": {                                      // ⚠️ 产物引用**相对 artifactsDir**
+      "markdownPath": "markdown.md",
+      "structuredContentPath": "structured_content.json",
+      "middleJsonPath": "middle_json.json",
+      "assetsDir": "images"                             // ⚠️ 有裁剪图时才有
+    }
   },
-  "warnings": ["档位 advanced 在本机不可用（pdf_image_tiers 不含），已用 basic"],
-  "durationMs": 8261
+  "metrics": {
+    "warnings": ["档位 advanced 在本机不可用（pdf_image_tiers 不含），已用 basic"],
+    "degradedFrom": "advanced",                         // 发生过降级时才有
+    "durationMs": 8261
+  }
 }
 
 // 失败
 {
+  "version": 1,
+  "key": "ocr.parse",
   "ok": false,
   "error": {
     "code": "unavailable",                                  // ⚠️ 归一后的能力码，不是内部码
@@ -816,12 +837,13 @@ export interface LocalParseResult {
     "hint": "安装：uv tool install --python 3.12 \"mineru>=4.0,<5\"",
     "details": { "engineCode": "engine_unavailable", "searched": ["PATH", "~/.local/bin", ".venv/bin"] }
   },
-  "warnings": [],
-  "durationMs": 12
+  "metrics": { "durationMs": 12 }
 }
 ```
 
 ⚠️ **`error.code` 对外是归一后的能力码，内部码在 `details.engineCode`**（§7.6）—— 业务方按能力码分支，运维按内部码定位。⚠️ **ZCode 自己的 stdout 是上面这样的单个 JSON 对象**；⚠️ **MinerU 的 stdout 是人读文本**（`已解析 1 个输入。`），**不得当 JSON 解析**（M4）⇒ **那段文本走 stderr**（当进度信息），不混进 stdout 的 JSON（验收 A10）。
+
+⚠️ **2026-11-12 起顶层不再有 `engine` / `tier` / `degradedFrom` / `warnings`**（统一信封的字段归属见 [`capability-cli-blocks.md`](./capability-cli-blocks.md) §5.4）：`engine` / `tier` 进 `output`，`warnings` / `degradedFrom` / `durationMs` 进 `metrics`。⚠️ **旧的 `output.outputDir` / `output.markdownPath` 等绝对路径也一并移出 `output`** —— 现在 `output.artifactsDir` 相对 sidecar 目录、`output.artifacts.*` 相对 `artifactsDir`（§6.2 的路径基准），**消费方按基准解析，不要按绝对路径猜**。
 
 ### 7.6 错误码与退出码
 
@@ -1065,10 +1087,10 @@ OCR 能力的引擎选择**不再由能力层做**：能力把文档交给 `loca
 
 | 文件 | 要改什么 | 状态（2026-11-09） |
 | --- | --- | --- |
-| `ocr-local.md` | §3 `OcrCapabilityInput`（补 `engine` / `tier` 字段；补 `dpi` 在 MinerU 路径的处置）；§3 `OcrCapabilityOutput`（**删掉重复声明**，只留一份联合类型，补 `tier` / `degradedFrom` / `sidecarPath` / `middleJsonPath`）；§4 引擎契约；§5 流水线；§6 sidecar（两变体、bbox 单位列、`engine.variant` 补进 v1 示例、补 v2 示例 JSON、tier 枚举补 `flash`）；§7 **状态所有者**（补 MinerU 行）；§8 错误表（补齐 6 个内部码，统一 `process_failed`）；§9 跨平台（代理、查找顺序）；§11 未决问题 4 | ⏸️ **未改**：v1 不接 OCR 能力（§1 已声明），等接线时一起改 |
+| `ocr-local.md` | §3 `OcrCapabilityInput`（补 `engine` / `tier` 字段；补 `dpi` 在 MinerU 路径的处置）；§3 `OcrCapabilityOutput`（**删掉重复声明**，只留一份联合类型，补 `tier` / `degradedFrom` / `sidecarPath` / `middleJsonPath`）；§4 引擎契约；§5 流水线；§6 sidecar（两变体、bbox 单位列、`engine.variant` 补进 v1 示例、补 v2 示例 JSON、tier 枚举补 `flash`）；§7 **状态所有者**（补 MinerU 行）；§8 错误表（补齐 6 个内部码，统一 `process_failed`）；§9 跨平台（代理、查找顺序）；§11 未决问题 4 | 🟡 **部分改（2026-11-12）**：§6.1 / §6.1.1 / §6.5 已按 [`capability-cli-blocks.md`](./capability-cli-blocks.md) 修订（sidecar 统一到 v3、交付形态改成族积木）；§3 / §4 / §5 / §7 / §8 / §9 仍 ⏸️ **未改**：v1 不接 OCR 能力（§1 已声明），等接线时一起改 |
 | `model-assets.md` | §5 **接入点 2/3 改为独立命令组 `zcode asset`**（平级于 `zcode ocr`，不进 `zcode ocr` 底下；`--offline` 将来注册到 `zcode` 全局旗标）；§11 **状态所有者**；§12 命令面；§14 开放问题 7（已结）+ 清掉 `server` 命令组与悬空的"§5 例外条款"引用 | ⏸️ **未改**：`asset` 命令组整体延期（§7.3 的 7 条待决），改它要等那些决策落地 |
 | `capability-registry.md` | §3 `CapabilityPorts` 加 `localInfra`；§5 状态所有者（产物落盘归 adapter）；§7 **错误映射表补齐 6 个内部码**；投影 C 的超时预算加 MinerU 豁免（`:328` 的"单页 120s / 整批 30min"不能套用） | ⏸️ **未改**：`capabilities` 包与 `cap` 分派都不存在（§1.1 核查），v1 不接线 |
-| `commands.md` | §53 的"唯一进程级入口"**例外作废**（`zcode ocr` 是子命令组，同一进程入口）；命令清单补 `ocr`；`parse` 的旗标统一为 `--path` / `--output` / `--tier` / `--json` | ✅ **已改**（2026-11-11：例外作废 + 补 `ocr` 行） |
+| `commands.md` | §53 的"唯一进程级入口"**例外作废**（`zcode ocr` 是子命令组，同一进程入口）；命令清单补 `ocr`；`parse` 的旗标统一为 `--path` / `--output` / `--tier` / `--json` | ✅ **已改**（2026-11-11：例外作废 + 补 `ocr` 行）；⚠️ **2026-11-12 补**：`inspect` 子命令、`--force`、`--pdf-password`、统一信封与进度通道（`commands.md` 的 `zcode ocr` 条目已补） |
 | `knowledge-rag.md` | §12 命令面表（**已改**） | ✅ 已改 |
 | `model/http-proxy.md` | ⚠️ **登记 §7.9 的"下载子进程剥离代理"例外**（否则与本 spec 的 `:9` 口径矛盾） | ✅ **已登记**（2026-11-08 同步时写入）；2026-11-09 补正两处表述：这条是 **SOCKS 专属**故障（HTTP 代理不触发），且**不写死"应该用哪个模型源"** |
 | `architecture-policy.yaml` | ⚠️ **列入同步清单**：新增 `.ts` 要 adopt 或逐文件例外（R6） | ✅ **已登记** `local-infra-unmanaged-files` 例外（16 个新文件，2026-11-09） |
@@ -1214,6 +1236,8 @@ OCR 能力的引擎选择**不再由能力层做**：能力把文档交给 `loca
 | **v5** | **2026-11-11** | **命令面改名 + CLI 原子化（用户定）。** ① 独立二进制 `zcode-infr-manage` → **`zcode` 的原子子命令组 `zcode ocr`**（D5 / M5 修订）；② 新增「CLI 原子化」小节：命令组按能力域切分、平级不嵌套（`zcode ocr` / `zcode llm` / `zcode asr` / `zcode asset`），**不设"基础设施总管"二进制**；③ §7.3 旗标改为**注册到 `zcode` 全局旗标表**（`--path` / `--output` / `--tier` / `--source`，严格解析器要求），命令组只做组合校验；④ 交付形态从"第二个 bin（改 4 处分发链）"改为"**零分发改动**"，SEA / Electron 桌面**自动具备**该命令；⑤ `asset` 组从 `zcode ocr` 底下移出，成为平级命令组 `zcode asset`；⑥ `commands.md` 的"唯一进程级入口"**例外作废**（同一进程入口）；⑦ 全文 `zcode-infr-manage` → `zcode ocr`、`zcode-infr-manage asset` → `zcode asset`；⑧ §7.10 与 [`capability-provisioning.md`](./capability-provisioning.md) 互相指向（第 1 步的自动供给层） |
 
 | **v6** | **2026-11-11** | **档位状态的判据补全（修第 2 步的前置依赖）。** ① §5.4 补「档位状态（`TierModelStatus.status`）怎么从引擎输出推出来」表：`ready` = 全部必需仓库就绪；`missing` = 引擎**明确报出**至少一个必需仓库缺失（**全新机器**就是这个状态）；`unknown` = 无仓库映射（flash / advanced）或引擎输出里查不到必需仓库的状态；② 同处补「下载命令只在 `missing` 时给、且只对 `basic` / `standard` 给（给的是 ZCode 自己的 `zcode ocr models download --tier <t>`，不是引擎原始命令）」；③ §7.4 契约注释同步；④ 实施层修 `adapters/src/local-infra/models-status.ts` 的 `toTierModelStatuses`：原先「没有任何仓库就绪 ⇒ unknown」会把**全新机器**判成 unknown ⇒ 能力供给层的自动备资产**永远不触发**（见 [`capability-provisioning.md`](./capability-provisioning.md) A15） |
+
+| **v7** | **2026-11-12** | **积木模型落地后的口径同步（[`capability-cli-blocks.md`](./capability-cli-blocks.md) §9 的同步项）。** ① M8 的子命令数从三个改成**四个**（补 `inspect`）；② §5.4 的健康反馈载体改成**统一信封**（`{ version, key, ok, output?, error?, metrics? }`），顶层不再有 `engine` / `tier` / `degradedFrom` / `warnings`；③ §7.3 命令面补 `zcode ocr inspect` 与 `--force` / `--pdf-password`，并说明六个旗标里 `--force` / `--pdf-password` **本来就在全局表**（不是本组新增）；④ §7.5 的 `parse --json` 样例整体改成统一信封 + 相对产物引用（`artifactsDir` 相对 sidecar 目录、`artifacts.*` 相对 `artifactsDir`）；⑤ §10 同步清单补 `commands.md` 的 2026-11-12 增量与 `ocr-local.md` 的部分改状态 |
 
 ⚠️ **审查发现的问题分布**：契约一致性 11 阻断 + 12 高 + 6 低；架构合规 3 P0 + 12 P1 + 3 P2；实现可行性 5 P0 + 13 P1 + 7 P2；证据充分性 7 P0 + 9 P1 + 9 P2。
 
