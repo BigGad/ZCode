@@ -620,6 +620,26 @@ test("接力：inspect 之后调 parse ⇒ 命中缓存，引擎不再被调用"
   assert.equal((payload.output?.artifacts as Record<string, string>).markdownPath, "markdown.md");
 });
 
+test("接力：inspect 之后调 inspect ⇒ 命中缓存（§6.5 接力矩阵的一格）", async () => {
+  const fileSystem = fileSystemWithSource();
+  const stub = stubPort({});
+
+  const first = await runOcr(input(["inspect"], { path: SOURCE_PATH }, { json: true }), {
+    fileSystem,
+    stub,
+  });
+  assert.equal(first.exitCode, 0);
+  assert.equal(stub.parseCalls.length, 1);
+
+  const second = await runOcr(input(["inspect"], { path: SOURCE_PATH }, { json: true }), {
+    fileSystem,
+    stub,
+  });
+  assert.equal(second.exitCode, 0);
+  assert.equal(stub.parseCalls.length, 1, "接力时不得再调引擎");
+  assert.equal(envelopeOf(second.stdout).output?.cached, true);
+});
+
 test("接力：parse 之后调 inspect ⇒ 命中缓存", async () => {
   const fileSystem = fileSystemWithSource();
   const stub = stubPort({});
